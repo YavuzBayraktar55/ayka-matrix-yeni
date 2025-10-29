@@ -10,40 +10,67 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const talepId = searchParams.get('talepId');
+    const personelTcKimlik = searchParams.get('personelTcKimlik');
 
-    console.log('🔍 GET /api/izin-gecmis - TalepID:', talepId);
+    console.log('🔍 GET /api/izin-gecmis - TalepID:', talepId, 'PersonelTcKimlik:', personelTcKimlik);
 
-    if (!talepId) {
-      console.error('❌ TalepID eksik');
-      return NextResponse.json({ error: 'Missing talepId' }, { status: 400 });
+    // Eğer talepId varsa, geçmiş kayıtlarını getir (eski davranış)
+    if (talepId) {
+      // Önce tablo var mı kontrol et
+      const { error: tableError } = await supabaseAdmin
+        .from('IzinTalepGecmis')
+        .select('count')
+        .limit(1);
+
+      if (tableError) {
+        console.error('❌ Tablo bulunamadı:', tableError);
+        return NextResponse.json({ 
+          error: 'IzinTalepGecmis tablosu bulunamadı. Lütfen SQL dosyasını çalıştırın.',
+          tableError: tableError.message 
+        }, { status: 500 });
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('IzinTalepGecmis')
+        .select('*')
+        .eq('TalepID', parseInt(talepId))
+        .order('IslemTarihi', { ascending: true });
+
+      if (error) {
+        console.error('❌ Geçmiş query error:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      console.log('✅ Geçmiş bulundu:', data?.length, 'kayıt');
+      return NextResponse.json({ data: data || [] });
     }
 
-    // Önce tablo var mı kontrol et
-    const { error: tableError } = await supabaseAdmin
-      .from('IzinTalepGecmis')
-      .select('count')
-      .limit(1);
+    // Eğer personelTcKimlik varsa veya hiçbiri yoksa, izin kayıtlarını getir (yeni davranış)
+    let query = supabaseAdmin
+      .from('IzinTalepleri')
+      .select(`
+        *,
+        PersonelLevelizasyon!inner(
+          PersonelTcKimlik,
+          PersonelEmail,
+          PersonelInfo(P_AdSoyad)
+        )
+      `)
+      .order('BaslangicTarihi', { ascending: false });
 
-    if (tableError) {
-      console.error('❌ Tablo bulunamadı:', tableError);
-      return NextResponse.json({ 
-        error: 'IzinTalepGecmis tablosu bulunamadı. Lütfen SQL dosyasını çalıştırın.',
-        tableError: tableError.message 
-      }, { status: 500 });
+    // Eğer belirli bir personel istendiyse filtrele
+    if (personelTcKimlik) {
+      query = query.eq('PersonelTcKimlik', personelTcKimlik);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('IzinTalepGecmis')
-      .select('*')
-      .eq('TalepID', parseInt(talepId))
-      .order('IslemTarihi', { ascending: true });
+    const { data, error } = await query;
 
     if (error) {
-      console.error('❌ Geçmiş query error:', error);
+      console.error('❌ İzin kayıtları query error:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    console.log('✅ Geçmiş bulundu:', data?.length, 'kayıt');
+    console.log('✅ İzin kayıtları bulundu:', data?.length, 'kayıt');
     return NextResponse.json({ data: data || [] });
 
   } catch (error) {

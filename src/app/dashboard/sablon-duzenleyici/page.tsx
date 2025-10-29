@@ -15,17 +15,27 @@ import { cn } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
-// Placeholder değişkenleri
-const PLACEHOLDERS = [
+// Placeholder değişkenleri - Kategorize edilmiş
+const PLACEHOLDERS_GENEL = [
   { key: '{personel_adi}', label: 'Personel Adı Soyadı', example: 'Ahmet Yılmaz' },
   { key: '{tc_no}', label: 'TC Kimlik No', example: '12345678901' },
   { key: '{dogum_tarihi}', label: 'Doğum Tarihi', example: '01.01.1990' },
-  { key: '{izin_baslangic}', label: 'İzin Başlangıç', example: '01.06.2024' },
-  { key: '{izin_bitis}', label: 'İzin Bitiş', example: '15.06.2024' },
-  { key: '{izin_gun}', label: 'İzin Gün Sayısı', example: '14' },
   { key: '{bolge}', label: 'Bölge', example: 'İstanbul' },
   { key: '{isyeri_sicil}', label: 'İşyeri Sicil No', example: '123456' },
   { key: '{hazirlama_tarihi}', label: 'Hazırlanma Tarihi', example: '28.10.2025' },
+];
+
+const PLACEHOLDERS_IZIN = [
+  { key: '{izin_baslangic}', label: 'İzin Başlangıç', example: '01.06.2024' },
+  { key: '{izin_bitis}', label: 'İzin Bitiş', example: '15.06.2024' },
+  { key: '{izin_gun}', label: 'İzin Gün Sayısı', example: '14' },
+  { key: '{izin_turu}', label: 'İzin Türü', example: 'Yıllık İzin' },
+];
+
+const PLACEHOLDERS_AVANS = [
+  { key: '{avans_miktar}', label: 'Avans Miktarı', example: '5.000,00 TL' },
+  { key: '{avans_tarih}', label: 'Avans Talep Tarihi', example: '15.10.2025' },
+  { key: '{avans_aciklama}', label: 'Avans Açıklaması', example: 'Acil ihtiyaç' },
 ];
 
 interface TemplateImage {
@@ -140,22 +150,66 @@ function SablonDuzenleyiciContent() {
 
   // Placeholder ekle
   const insertPlaceholder = useCallback((placeholder: string) => {
+    // Aktif section'ın ref'ini al
+    let targetRef = null;
+    if (activeSection === 'header') targetRef = headerRef.current;
+    else if (activeSection === 'content') targetRef = contentRef.current;
+    else if (activeSection === 'footer') targetRef = footerRef.current;
+
+    if (!targetRef) {
+      alert('⚠️ Lütfen önce bir alan seçin (Üst Bilgi, İçerik veya Alt Bilgi)');
+      setShowPlaceholderMenu(false);
+      return;
+    }
+
     const selection = window.getSelection();
     if (selection && selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
+      
+      // Seçimin aktif editör alanı içinde olduğunu kontrol et
+      const isInsideTarget = targetRef.contains(range.commonAncestorContainer);
+      
+      if (!isInsideTarget) {
+        // Eğer seçim editör alanının dışındaysa, editör alanının sonuna ekle
+        range.selectNodeContents(targetRef);
+        range.collapse(false); // Sonuna git
+      }
+      
       const span = document.createElement('span');
       span.className = 'placeholder-text';
       span.contentEditable = 'false';
       span.textContent = placeholder;
       span.style.cssText = 'background: #e0e7ff; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-weight: 600; margin: 0 2px; cursor: pointer;';
+      
       range.insertNode(span);
+      
+      // Placeholder'dan sonra bir boşluk ekle
+      const space = document.createTextNode(' ');
       range.setStartAfter(span);
+      range.insertNode(space);
+      range.setStartAfter(space);
       range.collapse(true);
+      
       selection.removeAllRanges();
       selection.addRange(range);
+      
+      // Focus'u editör alanına ver
+      targetRef.focus();
+    } else {
+      // Hiç seçim yoksa, editör alanının sonuna ekle
+      const span = document.createElement('span');
+      span.className = 'placeholder-text';
+      span.contentEditable = 'false';
+      span.textContent = placeholder;
+      span.style.cssText = 'background: #e0e7ff; color: #4f46e5; padding: 2px 6px; border-radius: 4px; font-weight: 600; margin: 0 2px; cursor: pointer;';
+      
+      targetRef.appendChild(span);
+      targetRef.appendChild(document.createTextNode(' '));
+      targetRef.focus();
     }
+    
     setShowPlaceholderMenu(false);
-  }, []);
+  }, [activeSection]);
 
   // Resim yükle
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -851,11 +905,18 @@ function SablonDuzenleyiciContent() {
 
                 {showPlaceholderMenu && (
                   <div className={cn(
-                    'absolute top-full mt-2 w-72 rounded-xl border shadow-xl z-50 max-h-96 overflow-y-auto',
+                    'absolute top-full mt-2 w-80 rounded-xl border shadow-xl z-50 max-h-[500px] overflow-y-auto',
                     isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
                   )}>
-                    <div className="p-2">
-                      {PLACEHOLDERS.map((placeholder) => (
+                    {/* Genel Placeholders */}
+                    <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                      <div className={cn(
+                        'text-xs font-bold px-3 py-1 mb-1',
+                        isDark ? 'text-gray-400' : 'text-gray-500'
+                      )}>
+                        📋 GENEL BİLGİLER
+                      </div>
+                      {PLACEHOLDERS_GENEL.map((placeholder) => (
                         <button
                           key={placeholder.key}
                           onClick={() => insertPlaceholder(placeholder.key)}
@@ -865,7 +926,7 @@ function SablonDuzenleyiciContent() {
                           )}
                         >
                           <div className="font-medium text-sm">{placeholder.label}</div>
-                          <div className="text-xs text-purple-500">{placeholder.key}</div>
+                          <div className="text-xs text-blue-500">{placeholder.key}</div>
                           <div className={cn(
                             'text-xs mt-1',
                             isDark ? 'text-gray-400' : 'text-gray-500'
@@ -875,6 +936,68 @@ function SablonDuzenleyiciContent() {
                         </button>
                       ))}
                     </div>
+
+                    {/* İzin Placeholders */}
+                    {(templateType === 'izin' || templateType === 'genel') && (
+                      <div className="p-2 border-b border-gray-200 dark:border-gray-700">
+                        <div className={cn(
+                          'text-xs font-bold px-3 py-1 mb-1',
+                          isDark ? 'text-gray-400' : 'text-gray-500'
+                        )}>
+                          📅 İZİN BİLGİLERİ
+                        </div>
+                        {PLACEHOLDERS_IZIN.map((placeholder) => (
+                          <button
+                            key={placeholder.key}
+                            onClick={() => insertPlaceholder(placeholder.key)}
+                            className={cn(
+                              'w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
+                              isDark ? 'text-white' : 'text-gray-900'
+                            )}
+                          >
+                            <div className="font-medium text-sm">{placeholder.label}</div>
+                            <div className="text-xs text-green-500">{placeholder.key}</div>
+                            <div className={cn(
+                              'text-xs mt-1',
+                              isDark ? 'text-gray-400' : 'text-gray-500'
+                            )}>
+                              Örnek: {placeholder.example}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Avans Placeholders */}
+                    {(templateType === 'avans' || templateType === 'genel') && (
+                      <div className="p-2">
+                        <div className={cn(
+                          'text-xs font-bold px-3 py-1 mb-1',
+                          isDark ? 'text-gray-400' : 'text-gray-500'
+                        )}>
+                          💰 AVANS BİLGİLERİ
+                        </div>
+                        {PLACEHOLDERS_AVANS.map((placeholder) => (
+                          <button
+                            key={placeholder.key}
+                            onClick={() => insertPlaceholder(placeholder.key)}
+                            className={cn(
+                              'w-full text-left px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
+                              isDark ? 'text-white' : 'text-gray-900'
+                            )}
+                          >
+                            <div className="font-medium text-sm">{placeholder.label}</div>
+                            <div className="text-xs text-orange-500">{placeholder.key}</div>
+                            <div className={cn(
+                              'text-xs mt-1',
+                              isDark ? 'text-gray-400' : 'text-gray-500'
+                            )}>
+                              Örnek: {placeholder.example}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

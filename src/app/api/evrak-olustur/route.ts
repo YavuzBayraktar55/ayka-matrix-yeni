@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { sablonId, personelTcKimlik, izinData } = body;
+    const { sablonId, personelTcKimlik, izinData, avansData } = body;
 
     if (!sablonId || !personelTcKimlik) {
       return NextResponse.json({ 
@@ -141,6 +141,18 @@ export async function POST(request: NextRequest) {
         ? new Date(izinData.BitisTarihi).toLocaleDateString('tr-TR')
         : '';
       variables['{izin_gun}'] = izinData.GunSayisi?.toString() || '';
+      variables['{izin_turu}'] = izinData.IzinTuru || '';
+    }
+
+    // Avans verileri varsa ekle
+    if (avansData) {
+      variables['{avans_miktar}'] = avansData.AvansMiktari 
+        ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(avansData.AvansMiktari)
+        : '';
+      variables['{avans_tarih}'] = avansData.TalepTarihi 
+        ? new Date(avansData.TalepTarihi).toLocaleDateString('tr-TR')
+        : '';
+      variables['{avans_aciklama}'] = avansData.Aciklama || '';
     }
 
     // HTML içeriğinde değişkenleri değiştir

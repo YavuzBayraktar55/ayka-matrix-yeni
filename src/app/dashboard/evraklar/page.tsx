@@ -35,13 +35,46 @@ interface Personel {
 interface Sablon {
   SablonID: number;
   SablonAdi: string;
-  SablonTuru: string;
+  SablonTuru: 'genel' | 'izin' | 'avans' | 'ise_giris' | 'isten_cikis';
   HeaderContent: string;
   ContentHTML: string;
   FooterContent: string;
   ImagesJSON: string;
   StylesJSON: string;
   created_at: string;
+}
+
+interface IzinKayit {
+  IzinID: number;
+  PersonelTcKimlik: string;
+  BaslangicTarihi: string;
+  BitisTarihi: string;
+  IzinTuru: string;
+  Durum: string;
+  GunSayisi: number;
+  PersonelLevelizasyon?: {
+    PersonelTcKimlik: string;
+    PersonelEmail: string;
+    PersonelInfo?: {
+      P_AdSoyad: string;
+    };
+  };
+}
+
+interface AvansKayit {
+  AvansID: number;
+  PersonelTcKimlik: string;
+  TalepTarihi: string;
+  AvansMiktari: number;
+  Durum: string;
+  Aciklama?: string;
+  PersonelLevelizasyon?: {
+    PersonelTcKimlik: string;
+    PersonelEmail: string;
+    PersonelInfo?: {
+      P_AdSoyad: string;
+    };
+  };
 }
 
 interface TemplateImage {
@@ -80,7 +113,14 @@ export default function EvraklarPage() {
   
   const [sablonlar, setSablonlar] = useState<Sablon[]>([]);
   const [selectedSablon, setSelectedSablon] = useState<Sablon | null>(null);
+  const [selectedPersonel, setSelectedPersonel] = useState<Personel | null>(null);
+  
   const [showPersonelModal, setShowPersonelModal] = useState(false);
+  const [showIzinModal, setShowIzinModal] = useState(false);
+  const [showAvansModal, setShowAvansModal] = useState(false);
+  
+  const [izinKayitlari, setIzinKayitlari] = useState<IzinKayit[]>([]);
+  const [avansKayitlari, setAvansKayitlari] = useState<AvansKayit[]>([]);
   
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
@@ -159,6 +199,70 @@ export default function EvraklarPage() {
       }
     } catch (error) {
       console.error('❌ Şablon yükleme hatası:', error);
+    }
+  };
+
+  // Tüm izinleri getir (tüm personeller için)
+  const fetchAllIzinler = async () => {
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        alert('Oturum bulunamadı!');
+        return;
+      }
+
+      const response = await fetch('/api/izin-gecmis', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setIzinKayitlari(result.data || []);
+        setShowIzinModal(true);
+        console.log('✅ Tüm izinler yüklendi:', result.data?.length);
+      } else {
+        alert('İzinler yüklenemedi!');
+      }
+    } catch (error) {
+      console.error('İzin yükleme hatası:', error);
+      alert('İzinler yüklenemedi!');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Tüm avansları getir (tüm personeller için)
+  const fetchAllAvanslar = async () => {
+    setLoading(true);
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('AvansKayitlari')
+        .select(`
+          *,
+          PersonelLevelizasyon!inner(
+            PersonelTcKimlik,
+            PersonelEmail,
+            PersonelInfo(P_AdSoyad)
+          )
+        `)
+        .order('TalepTarihi', { ascending: false });
+
+      if (error) throw error;
+      
+      setAvansKayitlari(data || []);
+      setShowAvansModal(true);
+      console.log('✅ Tüm avanslar yüklendi:', data?.length);
+    } catch (error) {
+      console.error('Avans yükleme hatası:', error);
+      alert('Avanslar yüklenemedi!');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -352,10 +456,32 @@ export default function EvraklarPage() {
                           <button
                             onClick={() => {
                               setSelectedSablon(sablon);
-                              if (personeller.length > 0) {
-                                setShowPersonelModal(true);
-                              } else {
-                                alert('Henüz personel yok!');
+                              
+                              // Şablon içeriğinde hangi placeholder'lar var kontrol et
+                              const allContent = `${sablon.HeaderContent} ${sablon.ContentHTML} ${sablon.FooterContent}`;
+                              const hasIzinPlaceholder = allContent.includes('{izin_baslangic}') || 
+                                                        allContent.includes('{izin_bitis}') || 
+                                                        allContent.includes('{izin_gun}') ||
+                                                        allContent.includes('{izin_turu}');
+                              const hasAvansPlaceholder = allContent.includes('{avans_miktar}') || 
+                                                         allContent.includes('{avans_tarih}') || 
+                                                         allContent.includes('{avans_aciklama}');
+                              
+                              // İzin placeholder'ı varsa tüm izinleri göster
+                              if (hasIzinPlaceholder) {
+                                fetchAllIzinler();
+                              } 
+                              // Avans placeholder'ı varsa tüm avansları göster
+                              else if (hasAvansPlaceholder) {
+                                fetchAllAvanslar();
+                              } 
+                              // Yoksa personel seç
+                              else {
+                                if (personeller.length > 0) {
+                                  setShowPersonelModal(true);
+                                } else {
+                                  alert('Henüz personel yok!');
+                                }
                               }
                             }}
                             disabled={loading}
@@ -467,39 +593,97 @@ export default function EvraklarPage() {
                         <button
                           key={personel.PersonelTcKimlik}
                           onClick={async () => {
-                            setLoading(true);
-                            try {
-                              const supabase = createClient();
-                              const { data: { session } } = await supabase.auth.getSession();
-                              
-                              if (!session?.access_token) {
-                                alert('Oturum bulunamadı!');
-                                return;
+                            setSelectedPersonel(personel);
+                            
+                            // Şablon türüne göre yönlendir
+                            if (selectedSablon.SablonTuru === 'izin') {
+                              // İzin kayıtlarını getir
+                              setLoading(true);
+                              try {
+                                const supabase = createClient();
+                                const { data: { session } } = await supabase.auth.getSession();
+                                
+                                if (!session?.access_token) {
+                                  alert('Oturum bulunamadı!');
+                                  return;
+                                }
+
+                                const response = await fetch(`/api/izin-gecmis?personelTcKimlik=${personel.PersonelTcKimlik}`, {
+                                  headers: {
+                                    'Authorization': `Bearer ${session.access_token}`
+                                  }
+                                });
+
+                                if (response.ok) {
+                                  const data = await response.json();
+                                  setIzinKayitlari(data.data || []);
+                                  setShowPersonelModal(false);
+                                  setShowIzinModal(true);
+                                }
+                              } catch (error) {
+                                console.error('İzin kayıtları yüklenemedi:', error);
+                                alert('İzin kayıtları yüklenemedi!');
+                              } finally {
+                                setLoading(false);
                               }
+                            } else if (selectedSablon.SablonTuru === 'avans') {
+                              // Avans kayıtlarını getir
+                              setLoading(true);
+                              try {
+                                const supabase = createClient();
+                                const { data, error } = await supabase
+                                  .from('AvansKayitlari')
+                                  .select('*')
+                                  .eq('PersonelTcKimlik', personel.PersonelTcKimlik)
+                                  .order('TalepTarihi', { ascending: false });
 
-                              const response = await fetch('/api/evrak-olustur', {
-                                method: 'POST',
-                                headers: { 
-                                  'Content-Type': 'application/json',
-                                  'Authorization': `Bearer ${session.access_token}`
-                                },
-                                body: JSON.stringify({
-                                  sablonId: selectedSablon.SablonID,
-                                  personelTcKimlik: personel.PersonelTcKimlik,
-                                }),
-                              });
+                                if (error) throw error;
+                                
+                                setAvansKayitlari(data || []);
+                                setShowPersonelModal(false);
+                                setShowAvansModal(true);
+                              } catch (error) {
+                                console.error('Avans kayıtları yüklenemedi:', error);
+                                alert('Avans kayıtları yüklenemedi!');
+                              } finally {
+                                setLoading(false);
+                              }
+                            } else {
+                              // Genel şablon - direkt oluştur
+                              setLoading(true);
+                              try {
+                                const supabase = createClient();
+                                const { data: { session } } = await supabase.auth.getSession();
+                                
+                                if (!session?.access_token) {
+                                  alert('Oturum bulunamadı!');
+                                  return;
+                                }
 
-                              if (!response.ok) throw new Error('Evrak oluşturulamadı');
+                                const response = await fetch('/api/evrak-olustur', {
+                                  method: 'POST',
+                                  headers: { 
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${session.access_token}`
+                                  },
+                                  body: JSON.stringify({
+                                    sablonId: selectedSablon.SablonID,
+                                    personelTcKimlik: personel.PersonelTcKimlik,
+                                  }),
+                                });
 
-                              const result = await response.json();
-                              setPreviewData(result.data);
-                              setShowPersonelModal(false);
-                              setShowPreviewModal(true);
-                            } catch (error) {
-                              console.error('Error:', error);
-                              alert('Evrak oluşturulurken bir hata oluştu!');
-                            } finally {
-                              setLoading(false);
+                                if (!response.ok) throw new Error('Evrak oluşturulamadı');
+
+                                const result = await response.json();
+                                setPreviewData(result.data);
+                                setShowPersonelModal(false);
+                                setShowPreviewModal(true);
+                              } catch (error) {
+                                console.error('Error:', error);
+                                alert('Evrak oluşturulurken bir hata oluştu!');
+                              } finally {
+                                setLoading(false);
+                              }
                             }
                           }}
                           disabled={loading}
@@ -534,6 +718,348 @@ export default function EvraklarPage() {
                                       <span>{personel.BolgeInfo.BolgeAdi}</span>
                                     </>
                                   )}
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronRight className={cn(
+                              'w-5 h-5 transition-transform group-hover:translate-x-1',
+                              isDark ? 'text-gray-400' : 'text-gray-500'
+                            )} />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* İzin Seçim Modal */}
+      {showIzinModal && selectedSablon && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9999] overflow-hidden">
+            <div 
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => {
+                setShowIzinModal(false);
+                setSelectedPersonel(null);
+                setIzinKayitlari([]);
+              }}
+            />
+            
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000] pointer-events-none">
+              <div 
+                className={cn(
+                  'w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden pointer-events-auto',
+                  'transform transition-all duration-300 ease-out',
+                  isDark ? 'bg-gray-900' : 'bg-white'
+                )}
+              >
+                {/* Header */}
+                <div className="relative bg-gradient-to-r from-green-600 to-emerald-700 p-6">
+                  <button
+                    onClick={() => {
+                      setShowIzinModal(false);
+                      setSelectedPersonel(null);
+                      setIzinKayitlari([]);
+                    }}
+                    className="absolute top-4 right-4 text-white/80 hover:text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  
+                  <h2 className="text-2xl font-bold text-white mb-2">
+                    📅 İzin Kaydı Seçin
+                  </h2>
+                  <p className="text-green-100">
+                    {selectedPersonel 
+                      ? <><span className="font-semibold">{selectedPersonel.PersonelInfo?.P_AdSoyad}</span> için izin seçin</>
+                      : <><span className="font-semibold">{selectedSablon.SablonAdi}</span> için izin seçin</>
+                    }
+                  </p>
+                </div>
+
+                {/* Content */}
+                <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                  {loading ? (
+                    <div className="text-center py-12">
+                      <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent mx-auto mb-4"></div>
+                      <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>İzinler yükleniyor...</p>
+                    </div>
+                  ) : izinKayitlari.length === 0 ? (
+                    <div className={cn(
+                      'text-center py-12',
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    )}>
+                      <Calendar className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg">Bu personelin izin kaydı bulunamadı</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {izinKayitlari.map((izin) => (
+                        <button
+                          key={izin.IzinID}
+                          onClick={async () => {
+                            setLoading(true);
+                            try {
+                              const supabase = createClient();
+                              const { data: { session } } = await supabase.auth.getSession();
+                              
+                              if (!session?.access_token) {
+                                alert('Oturum bulunamadı!');
+                                return;
+                              }
+
+                              // PersonelTcKimlik'i izinden al (selectedPersonel yoksa)
+                              const personelTc = selectedPersonel?.PersonelTcKimlik || izin.PersonelTcKimlik;
+
+                              const response = await fetch('/api/evrak-olustur', {
+                                method: 'POST',
+                                headers: { 
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${session.access_token}`
+                                },
+                                body: JSON.stringify({
+                                  sablonId: selectedSablon.SablonID,
+                                  personelTcKimlik: personelTc,
+                                  izinData: izin
+                                }),
+                              });
+
+                              if (!response.ok) throw new Error('Evrak oluşturulamadı');
+
+                              const result = await response.json();
+                              setPreviewData(result.data);
+                              setShowIzinModal(false);
+                              setShowPreviewModal(true);
+                            } catch (error) {
+                              console.error('Error:', error);
+                              alert('Evrak oluşturulurken bir hata oluştu!');
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                          disabled={loading}
+                          className={cn(
+                            'w-full p-4 rounded-xl border-2 text-left transition-all hover:border-green-500 hover:shadow-lg group',
+                            loading && 'opacity-50 cursor-not-allowed',
+                            isDark 
+                              ? 'bg-gray-800/50 border-gray-600 hover:bg-gray-800' 
+                              : 'bg-white border-gray-200 hover:bg-green-50'
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white">
+                                <Calendar className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className={cn(
+                                  'font-semibold',
+                                  isDark ? 'text-white' : 'text-gray-900'
+                                )}>
+                                  {izin.IzinTuru} ({izin.GunSayisi} gün)
+                                  {!selectedPersonel && izin.PersonelLevelizasyon?.PersonelInfo?.P_AdSoyad && (
+                                    <span className={cn(
+                                      'ml-2 text-sm font-normal',
+                                      isDark ? 'text-gray-400' : 'text-gray-600'
+                                    )}>
+                                      - {izin.PersonelLevelizasyon.PersonelInfo.P_AdSoyad}
+                                    </span>
+                                  )}
+                                </p>
+                                <div className={cn(
+                                  'text-sm flex items-center gap-3',
+                                  isDark ? 'text-gray-400' : 'text-gray-600'
+                                )}>
+                                  <span>{new Date(izin.BaslangicTarihi).toLocaleDateString('tr-TR')}</span>
+                                  <span>→</span>
+                                  <span>{new Date(izin.BitisTarihi).toLocaleDateString('tr-TR')}</span>
+                                  <span className={cn(
+                                    'ml-2 px-2 py-0.5 rounded text-xs',
+                                    izin.Durum === 'Onaylandi' ? 'bg-green-500/20 text-green-400' :
+                                    izin.Durum === 'Beklemede' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-red-500/20 text-red-400'
+                                  )}>
+                                    {izin.Durum}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <ChevronRight className={cn(
+                              'w-5 h-5 transition-transform group-hover:translate-x-1',
+                              isDark ? 'text-gray-400' : 'text-gray-500'
+                            )} />
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>,
+        document.body
+      )}
+
+      {/* Avans Seçim Modal */}
+      {showAvansModal && selectedSablon && createPortal(
+        <>
+          <div className="fixed inset-0 z-[9999] overflow-hidden">
+            <div 
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => {
+                setShowAvansModal(false);
+                setSelectedPersonel(null);
+                setAvansKayitlari([]);
+              }}
+            />
+            
+            <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000] pointer-events-none">
+              <div 
+                className={cn(
+                  'w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden pointer-events-auto',
+                  'transform transition-all duration-300 ease-out',
+                  isDark ? 'bg-gray-900' : 'bg-white'
+                )}
+              >
+                {/* Header */}
+                <div className="relative bg-gradient-to-r from-orange-600 to-amber-700 p-6">
+                  <button
+                    onClick={() => {
+                      setShowAvansModal(false);
+                      setSelectedPersonel(null);
+                      setAvansKayitlari([]);
+                    }}
+                    className="absolute top-4 right-4 text-white/80 hover:text-white hover:bg-white/20 rounded-lg p-2 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                  
+                  <h2 className="text-2xl font-bold text-white mb-2">
+                    💰 Avans Kaydı Seçin
+                  </h2>
+                  <p className="text-orange-100">
+                    {selectedPersonel 
+                      ? <><span className="font-semibold">{selectedPersonel.PersonelInfo?.P_AdSoyad}</span> için avans seçin</>
+                      : <><span className="font-semibold">{selectedSablon.SablonAdi}</span> için avans seçin</>
+                    }
+                  </p>
+                </div>
+
+                {/* Content */}
+                <div className="p-6 overflow-y-auto max-h-[calc(90vh-180px)]">
+                  {loading ? (
+                    <div className="text-center py-12">
+                      <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-500 border-t-transparent mx-auto mb-4"></div>
+                      <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Avanslar yükleniyor...</p>
+                    </div>
+                  ) : avansKayitlari.length === 0 ? (
+                    <div className={cn(
+                      'text-center py-12',
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    )}>
+                      <DollarSign className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                      <p className="text-lg">Bu personelin avans kaydı bulunamadı</p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {avansKayitlari.map((avans) => (
+                        <button
+                          key={avans.AvansID}
+                          onClick={async () => {
+                            setLoading(true);
+                            try {
+                              const supabase = createClient();
+                              const { data: { session } } = await supabase.auth.getSession();
+                              
+                              if (!session?.access_token) {
+                                alert('Oturum bulunamadı!');
+                                return;
+                              }
+
+                              // PersonelTcKimlik'i avanstan al (selectedPersonel yoksa)
+                              const personelTc = selectedPersonel?.PersonelTcKimlik || avans.PersonelTcKimlik;
+
+                              const response = await fetch('/api/evrak-olustur', {
+                                method: 'POST',
+                                headers: { 
+                                  'Content-Type': 'application/json',
+                                  'Authorization': `Bearer ${session.access_token}`
+                                },
+                                body: JSON.stringify({
+                                  sablonId: selectedSablon.SablonID,
+                                  personelTcKimlik: personelTc,
+                                  avansData: avans
+                                }),
+                              });
+
+                              if (!response.ok) throw new Error('Evrak oluşturulamadı');
+
+                              const result = await response.json();
+                              setPreviewData(result.data);
+                              setShowAvansModal(false);
+                              setShowPreviewModal(true);
+                            } catch (error) {
+                              console.error('Error:', error);
+                              alert('Evrak oluşturulurken bir hata oluştu!');
+                            } finally {
+                              setLoading(false);
+                            }
+                          }}
+                          disabled={loading}
+                          className={cn(
+                            'w-full p-4 rounded-xl border-2 text-left transition-all hover:border-orange-500 hover:shadow-lg group',
+                            loading && 'opacity-50 cursor-not-allowed',
+                            isDark 
+                              ? 'bg-gray-800/50 border-gray-600 hover:bg-gray-800' 
+                              : 'bg-white border-gray-200 hover:bg-orange-50'
+                          )}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3 flex-1">
+                              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center text-white">
+                                <DollarSign className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1">
+                                <p className={cn(
+                                  'font-semibold text-lg',
+                                  isDark ? 'text-white' : 'text-gray-900'
+                                )}>
+                                  {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY' }).format(avans.AvansMiktari)}
+                                  {!selectedPersonel && avans.PersonelLevelizasyon?.PersonelInfo?.P_AdSoyad && (
+                                    <span className={cn(
+                                      'ml-2 text-sm font-normal',
+                                      isDark ? 'text-gray-400' : 'text-gray-600'
+                                    )}>
+                                      - {avans.PersonelLevelizasyon.PersonelInfo.P_AdSoyad}
+                                    </span>
+                                  )}
+                                </p>
+                                <div className={cn(
+                                  'text-sm flex items-center gap-3',
+                                  isDark ? 'text-gray-400' : 'text-gray-600'
+                                )}>
+                                  <span>{new Date(avans.TalepTarihi).toLocaleDateString('tr-TR')}</span>
+                                  {avans.Aciklama && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="truncate max-w-xs">{avans.Aciklama}</span>
+                                    </>
+                                  )}
+                                  <span className={cn(
+                                    'ml-auto px-2 py-0.5 rounded text-xs',
+                                    avans.Durum === 'Onaylandi' ? 'bg-green-500/20 text-green-400' :
+                                    avans.Durum === 'Beklemede' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-red-500/20 text-red-400'
+                                  )}>
+                                    {avans.Durum}
+                                  </span>
                                 </div>
                               </div>
                             </div>
