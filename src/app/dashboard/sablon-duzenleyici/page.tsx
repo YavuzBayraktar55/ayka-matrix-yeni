@@ -85,7 +85,7 @@ function SablonDuzenleyiciContent() {
   const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(null);
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
   const [showTemplateList, setShowTemplateList] = useState(false);
-  const [activeSection, setActiveSection] = useState<'header' | 'content' | 'footer'>('content');
+  const [activeSection] = useState<'content'>('content'); // Sadece content editlenebilir
   const [showPlaceholderMenu, setShowPlaceholderMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [currentColor, setCurrentColor] = useState('#000000');
@@ -128,36 +128,19 @@ function SablonDuzenleyiciContent() {
     }
   }, [searchParams]);
 
-  useEffect(() => {
-    if (headerRef.current && activeSection === 'header' && !headerRef.current.innerHTML) {
-      headerRef.current.innerHTML = template.header || '<p>Üst bilgi buraya...</p>';
-    }
-  }, [activeSection, template.header]);
-
-  useEffect(() => {
-    if (footerRef.current && activeSection === 'footer' && !footerRef.current.innerHTML) {
-      footerRef.current.innerHTML = template.footer || '<p>Alt bilgi buraya...</p>';
-    }
-  }, [activeSection, template.footer]);
-
   // Format komutları
   const execCommand = useCallback((command: string, value?: string) => {
     document.execCommand(command, false, value);
-    if (activeSection === 'content') contentRef.current?.focus();
-    if (activeSection === 'header') headerRef.current?.focus();
-    if (activeSection === 'footer') footerRef.current?.focus();
-  }, [activeSection]);
+    contentRef.current?.focus();
+  }, []);
 
   // Placeholder ekle
   const insertPlaceholder = useCallback((placeholder: string) => {
-    // Aktif section'ın ref'ini al
-    let targetRef = null;
-    if (activeSection === 'header') targetRef = headerRef.current;
-    else if (activeSection === 'content') targetRef = contentRef.current;
-    else if (activeSection === 'footer') targetRef = footerRef.current;
+    // Sadece content ref'ini kullan
+    const targetRef = contentRef.current;
 
     if (!targetRef) {
-      alert('⚠️ Lütfen önce bir alan seçin (Üst Bilgi, İçerik veya Alt Bilgi)');
+      alert('⚠️ İçerik alanı bulunamadı');
       setShowPlaceholderMenu(false);
       return;
     }
@@ -209,7 +192,8 @@ function SablonDuzenleyiciContent() {
     }
     
     setShowPlaceholderMenu(false);
-  }, [activeSection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Resim yükle
   const handleImageUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -606,9 +590,13 @@ function SablonDuzenleyiciContent() {
       } else {
         let errorMessage = 'Bilinmeyen hata';
         try {
-          const error = JSON.parse(responseText);
-          console.error('❌ API Error:', error);
-          errorMessage = error.error || error.message || JSON.stringify(error);
+          if (responseText) {
+            const error = JSON.parse(responseText);
+            console.error('❌ API Error:', error);
+            errorMessage = error.error || error.message || JSON.stringify(error);
+          } else {
+            errorMessage = `Sunucu hatası (${response.status})`;
+          }
         } catch (e) {
           console.error('❌ Response parse error:', e);
           errorMessage = responseText || 'Sunucu hatası';
@@ -1004,66 +992,35 @@ function SablonDuzenleyiciContent() {
             </div>
           </div>
 
-          {/* Section Tabs */}
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setActiveSection('header')}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition-all',
-                activeSection === 'header'
-                  ? 'bg-purple-500 text-white shadow-lg'
-                  : isDark
-                  ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
-              )}
-            >
-              Üst Bilgi
-            </button>
-            <button
-              onClick={() => setActiveSection('content')}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition-all',
-                activeSection === 'content'
-                  ? 'bg-purple-500 text-white shadow-lg'
-                  : isDark
-                  ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
-              )}
-            >
-              İçerik
-            </button>
-            <button
-              onClick={() => setActiveSection('footer')}
-              className={cn(
-                'px-4 py-2 rounded-lg font-medium transition-all',
-                activeSection === 'footer'
-                  ? 'bg-purple-500 text-white shadow-lg'
-                  : isDark
-                  ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                  : 'bg-white text-gray-700 hover:bg-gray-100'
-              )}
-            >
-              Alt Bilgi
-            </button>
-          </div>
-
-          {/* Editor Canvas */}
+          {/* Editor Canvas - A4 Çok Sayfalı Düzen */}
           <div 
-            className="pdf-canvas rounded-xl border shadow-2xl mx-auto relative"
+            className="pdf-canvas mx-auto"
             style={{ 
-              width: '794px', // A4 width at 96 DPI (210mm)
-              minHeight: '1123px', // A4 height at 96 DPI (297mm)
-              backgroundColor: '#ffffff',
-              border: '1px solid ' + (isDark ? '#374151' : '#e5e7eb')
+              width: '794px',
+              padding: '40px 0',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '20px'
             }}
           >
+            <div 
+              className="a4-page-editor"
+              style={{ 
+                width: '794px',
+                backgroundColor: '#ffffff',
+                position: 'relative',
+                minHeight: '1123px',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+              }}
+            >
             {/* Images Layer */}
             {images.map((img) => (
               <div
                 key={img.id}
                 className={cn(
                   'absolute border-2 transition-all',
-                  selectedImage === img.id ? 'selected-image border-purple-500 shadow-lg' : 'border-transparent hover:border-purple-300'
+                  selectedImage === img.id ? 'selected-image border-purple-500' : 'border-transparent hover:border-purple-300'
                 )}
                 style={{
                   left: `${img.x}px`,
@@ -1226,57 +1183,70 @@ function SablonDuzenleyiciContent() {
               </div>
             ))}
 
-            {/* Header Section */}
-            {activeSection === 'header' && (
-              <div
-                key="header-editor"
-                ref={headerRef}
-                contentEditable
-                className="p-8 outline-none min-h-[100px] border-b-2 border-dashed border-gray-300"
-                style={{
-                  fontSize: fontSize + 'px',
-                  fontFamily: fontFamily,
-                  color: '#000',
-                  lineHeight: '1.6'
-                }}
-                suppressContentEditableWarning
-              />
-            )}
-
-            {/* Content Section */}
-            {activeSection === 'content' && (
-              <div
-                key="content-editor"
-                ref={contentRef}
-                contentEditable
-                className="p-8 outline-none min-h-[600px]"
-                style={{
-                  fontSize: fontSize + 'px',
-                  fontFamily: fontFamily,
-                  color: '#000',
-                  lineHeight: '1.6'
-                }}
-                suppressContentEditableWarning
-              />
-            )}
-
-            {/* Footer Section */}
-            {activeSection === 'footer' && (
-              <div
-                key="footer-editor"
-                ref={footerRef}
-                contentEditable
-                className="p-8 outline-none min-h-[100px] border-t-2 border-dashed border-gray-300"
-                style={{
-                  fontSize: fontSize + 'px',
-                  fontFamily: fontFamily,
-                  color: '#000',
-                  lineHeight: '1.6'
-                }}
-                suppressContentEditableWarning
-              />
-            )}
-          </div>
+            {/* Content Section - Sadece içerik düzenlenebilir */}
+            <div
+              key="content-editor"
+              ref={contentRef}
+              contentEditable
+              className="outline-none relative"
+              style={{
+                fontSize: fontSize + 'px',
+                fontFamily: fontFamily,
+                color: '#000',
+                lineHeight: '1.6',
+                zIndex: 2,
+                minHeight: '100%',
+                padding: '60px 80px',
+                paddingBottom: '90px' // Alt boşluk
+              }}
+              suppressContentEditableWarning
+            />
+            
+            {/* Sayfa sınırı göstergeleri - Her 1123px'de */}
+            {(() => {
+              const editorHeight = contentRef.current?.scrollHeight || 1123;
+              const numDividers = Math.floor(editorHeight / 1123);
+              return Array.from({ length: numDividers }).map((_, i) => (
+                <div
+                  key={i}
+                  style={{
+                    position: 'absolute',
+                    left: '40px',
+                    right: '40px',
+                    top: `${(i + 1) * 1123}px`,
+                    height: '1px',
+                    background: 'repeating-linear-gradient(to right, #d0d0d0 0px, #d0d0d0 10px, transparent 10px, transparent 20px)',
+                    pointerEvents: 'none',
+                    zIndex: 5
+                  }}
+                />
+              ));
+            })()}
+            
+            {/* Sayfa numaraları */}
+            {(() => {
+              const editorHeight = contentRef.current?.scrollHeight || 1123;
+              const totalPages = Math.ceil(editorHeight / 1123);
+              return Array.from({ length: totalPages }).map((_, i) => (
+                <div
+                  key={`page-${i}`}
+                  style={{
+                    position: 'absolute',
+                    bottom: i === totalPages - 1 ? '30px' : 'auto',
+                    top: i < totalPages - 1 ? `${(i + 1) * 1123 - 50}px` : 'auto',
+                    right: '80px',
+                    fontSize: '10px',
+                    color: '#999',
+                    pointerEvents: 'none',
+                    zIndex: 5
+                  }}
+                >
+                  Sayfa {i + 1} / {totalPages}
+                </div>
+              ));
+            })()}
+            </div> {/* Close a4-page-editor */}
+          </div> {/* Close pdf-canvas */}
 
           {/* Help Text */}
           <div className={cn(
@@ -1295,7 +1265,8 @@ function SablonDuzenleyiciContent() {
             )}>
               <li>• Değişken butonundan {'{personel_adi}'}, {'{tc_no}'} gibi otomatik alanlar ekleyebilirsiniz</li>
               <li>• Resimleri tıklayarak seçin, köşelerinden/kenarlarından boyutlandırın</li>
-              <li>• Üst/Alt Bilgi kısımları her sayfada tekrar edecektir</li>
+              <li>• <strong>Çok sayfalı içerik:</strong> İçerik uzunsa önizlemede ve PDF&apos;de otomatik olarak yeni A4 sayfalarına bölünür</li>
+              <li>• Her sayfa 1123px yüksekliğinde (A4 boyutu) - içerik taşarsa yeni sayfa oluşturulur</li>
               <li>• Şablonunuz veritabanına kaydedilir ve evrak oluştururken kullanılır</li>
             </ul>
           </div>

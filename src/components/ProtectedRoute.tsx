@@ -3,6 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect, ReactNode } from 'react';
+import Loader from '@/components/Loader';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -25,8 +26,8 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
 
   if (loading) {
     return (
-      <div className="min-h-screen macos-bg flex items-center justify-center">
-        <div className="text-white text-xl">Yükleniyor...</div>
+      <div className="min-h-screen bg-[#2a2a2a] flex items-center justify-center">
+        <Loader />
       </div>
     );
   }

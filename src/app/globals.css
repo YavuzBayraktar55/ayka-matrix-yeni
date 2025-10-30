@@ -197,3 +197,115 @@ button, a, input, select, textarea {
     width: 100%;
   }
 }
+
+/* A4 Sayfa Düzeni - Word-like ayrı sayfalar (Önizleme) */
+.a4-page {
+  width: 794px !important;
+  height: 1123px !important; /* Sabit A4 yüksekliği */
+  background: white;
+  position: relative;
+  page-break-after: always;
+  break-after: page;
+  box-shadow: none; /* Box shadow tamamen kaldırıldı */
+  overflow: hidden; /* Her sayfa içeriği kendi sınırında */
+}
+
+/* Sayfa hover efekti */
+.a4-page:hover {
+  box-shadow: none; /* Hover'da da box shadow yok */
+}
+
+/* A4 Editör - Tek uzun sayfa (Şablon Düzenleyici) */
+.a4-page-editor {
+  width: 794px !important;
+  min-height: 1123px; /* Minimum A4 yüksekliği */
+  background: white;
+  position: relative;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.a4-page-editor:hover {
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+  transition: box-shadow 0.3s ease;
+}
+
+.pdf-canvas {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #f5f5f5; /* Gri zemin - sayfalar beyaz üzerinde */
+  padding: 40px 0;
+  gap: 20px; /* Sayfalar arası boşluk */
+}
+
+/* Sayfa içeriği */
+.page-content {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+/* Print Media - PDF için */
+@media print {
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: white;
+  }
+
+  .a4-page {
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  /* Son sayfada page break olmasın */
+  .a4-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  /* Kontrol butonlarını gizle */
+  .image-controls,
+  button,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Editör border'larını gizle */
+  .border-dashed {
+    border: none !important;
+  }
+}
+
+/* Editör için placeholder stilleri */
+.placeholder-text {
+  background: #e0e7ff;
+  color: #4f46e5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin: 0 2px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+}
+
+/* Sayfa kenar boşlukları görünümü */
+.a4-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+

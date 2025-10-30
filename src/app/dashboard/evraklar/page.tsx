@@ -125,6 +125,20 @@ export default function EvraklarPage() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pageCount, setPageCount] = useState(1);
+
+  // Sayfa sayısını hesapla (önizleme açıldığında)
+  useEffect(() => {
+    if (showPreviewModal && canvasRef.current) {
+      setTimeout(() => {
+        const pages = canvasRef.current?.querySelectorAll('.a4-page');
+        if (pages) {
+          setPageCount(pages.length);
+          console.log(`📄 Toplam ${pages.length} sayfa`);
+        }
+      }, 100);
+    }
+  }, [showPreviewModal, previewData]);
 
   useEffect(() => {
     if (searchQuery.trim() === '') {
@@ -266,22 +280,26 @@ export default function EvraklarPage() {
     }
   };
 
-  // PDF olarak indir
+  // PDF olarak indir - Ayrı sayfaları yakala
   const downloadPDF = async () => {
     if (!canvasRef.current || !previewData) return;
 
     try {
+      setLoading(true);
       const canvas = canvasRef.current;
       
-      // Canvas'ı yakalama - sadece canvas div'i, beyaz arkaplan zorla
-      const canvasImage = await html2canvas(canvas, {
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        background: '#ffffff'
-      });
+      // Tüm .a4-page elementlerini bul
+      const pages = canvas.querySelectorAll('.a4-page');
+      const totalPages = pages.length;
+      
+      if (totalPages === 0) {
+        alert('Sayfa bulunamadı!');
+        return;
+      }
 
-      // PDF oluştur - A4 boyutu mm
+      console.log(`📄 ${totalPages} sayfa PDF'e dönüştürülüyor...`);
+      
+      // PDF oluştur - mm birimi (standart A4)
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -289,31 +307,128 @@ export default function EvraklarPage() {
         compress: true
       });
       
-      const pdfWidth = 210; // A4 genişlik (mm)
-      const pdfHeight = 297; // A4 yükseklik (mm)
+      // A4 boyutları mm cinsinden
+      const pdfWidth = 210;
+      const pdfHeight = 297;
       
-      // Canvas'tan PNG oluştur
-      const imgData = canvasImage.toDataURL('image/png', 1.0);
+      // Orijinal devicePixelRatio'yu kaydet
+      const originalDPR = window.devicePixelRatio;
       
-      // Tam sayfa ekle - marjin yok
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      // Her sayfayı ayrı ayrı yakala
+      for (let i = 0; i < totalPages; i++) {
+        const pageElement = pages[i] as HTMLElement;
+        
+        console.log(`📄 Sayfa ${i + 1}/${totalPages} yakalanıyor (794x1123px)...`);
+        
+        // Geçici wrapper - zoom sorununu çözmek için
+        const wrapper = document.createElement('div');
+        wrapper.style.width = '794px';
+        wrapper.style.height = '1123px';
+        wrapper.style.position = 'fixed';
+        wrapper.style.left = '-9999px';
+        wrapper.style.top = '0';
+        wrapper.style.backgroundColor = '#FFFFFF';
+        wrapper.style.overflow = 'hidden';
+        wrapper.style.transform = 'scale(1)'; // Zoom etkisini sıfırla
+        wrapper.style.transformOrigin = 'top left';
+        
+        // Sayfayı klonla ve wrapper'a ekle
+        const clonedPage = pageElement.cloneNode(true) as HTMLElement;
+        clonedPage.style.backgroundColor = '#FFFFFF';
+        clonedPage.style.boxShadow = 'none';
+        
+        // Klonlanan sayfadaki tüm elementlerin box-shadow ve arka planlarını temizle
+        const allElements = clonedPage.querySelectorAll('*');
+        allElements.forEach((el) => {
+          const htmlEl = el as HTMLElement;
+          // Box shadow'ları kaldır
+          htmlEl.style.boxShadow = 'none';
+          // Görseller hariç tüm arka planları beyaz yap
+          if (htmlEl.tagName !== 'IMG') {
+            const bgColor = window.getComputedStyle(htmlEl).backgroundColor;
+            // Eğer transparent değilse beyaz yap
+            if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
+              htmlEl.style.backgroundColor = '#FFFFFF';
+            }
+          }
+        });
+        
+        wrapper.appendChild(clonedPage);
+        document.body.appendChild(wrapper);
+        
+        // DevicePixelRatio'yu geçici olarak sabitle
+        Object.defineProperty(window, 'devicePixelRatio', {
+          get: function() { return 1; },
+          configurable: true
+        });
+        
+        // Canvas'a dönüştür - sabit çözünürlük
+        const pageCanvas = await html2canvas(wrapper, {
+          useCORS: true,
+          allowTaint: true,
+          logging: false,
+          width: 794,
+          height: 1123
+        });
+        
+        // DevicePixelRatio'yu geri yükle
+        Object.defineProperty(window, 'devicePixelRatio', {
+          get: function() { return originalDPR; },
+          configurable: true
+        });
+        
+        // Wrapper'ı temizle
+        document.body.removeChild(wrapper);
+        
+        // Yeni sayfa ekle (ilk sayfa hariç)
+        if (i > 0) {
+          pdf.addPage();
+        }
+        
+        // Beyaz canvas oluştur - orijinal boyutta (794x1123)
+        const whiteCanvas = document.createElement('canvas');
+        whiteCanvas.width = 794;
+        whiteCanvas.height = 1123;
+        const ctx = whiteCanvas.getContext('2d');
+        
+        if (ctx) {
+          // 1. TAM beyaz arka plan
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, 794, 1123);
+          
+          // 2. İçeriği orijinal boyutta çiz (ölçekleme YOK)
+          ctx.drawImage(pageCanvas, 0, 0, 794, 1123);
+          
+          // 3. JPEG'e çevir
+          const imgData = whiteCanvas.toDataURL('image/jpeg', 1.0);
+          
+          // 4. PDF'e ekle
+          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+          
+          console.log(`✅ Sayfa ${i + 1} eklendi (794x1123px → ${pdfWidth}x${pdfHeight}mm)`);
+        }
+      }
       
       const fileName = `${previewData.sablonAdi}_${previewData.personel.PersonelInfo?.P_AdSoyad || 'personel'}_${new Date().getTime()}.pdf`;
       pdf.save(fileName);
       
       console.log('✅ PDF İndirildi:', fileName);
-      alert('✅ PDF başarıyla indirildi!');
+      alert(`✅ PDF başarıyla indirildi! (${totalPages} sayfa)`);
     } catch (error) {
       console.error('❌ PDF oluşturma hatası:', error);
       alert('PDF oluşturulurken hata oluştu!');
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchPersoneller();
-    fetchSablonlar();
+    if (user) {
+      fetchPersoneller();
+      fetchSablonlar();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user]);
 
   return (
     <>
@@ -1135,15 +1250,30 @@ export default function EvraklarPage() {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={downloadPDF}
-                      className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all font-medium"
+                      disabled={loading}
+                      className={cn(
+                        'flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all font-medium',
+                        loading && 'opacity-50 cursor-not-allowed'
+                      )}
                     >
-                      <Download className="w-5 h-5" />
-                      PDF İndir
+                      {loading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                          PDF Oluşturuluyor...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-5 h-5" />
+                          PDF İndir ({pageCount} sayfa)
+                        </>
+                      )}
                     </button>
                     <button
                       onClick={() => setShowPreviewModal(false)}
+                      disabled={loading}
                       className={cn(
                         'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white rounded-lg',
+                        loading && 'opacity-50 cursor-not-allowed',
                         isDark ? 'text-gray-300' : 'text-gray-600'
                       )}
                     >
@@ -1153,83 +1283,102 @@ export default function EvraklarPage() {
                 </div>
 
                 {/* Preview Content */}
-                <div className="p-6 flex justify-center" style={{ backgroundColor: '#ffffff' }}>
+                <div className="p-10" style={{ backgroundColor: '#f5f5f5' }}>
                   <div
                     ref={canvasRef}
                     className="pdf-canvas"
-                    style={{
-                      width: '794px',
-                      minHeight: '1123px',
-                      backgroundColor: '#ffffff',
-                      position: 'relative',
-                      padding: '0',
-                      margin: '0 auto',
-                      boxShadow: 'none'
-                    }}
                   >
-                    {/* Images */}
-                    {previewData.images?.map((img: TemplateImage) => (
-                      <img
-                        key={img.id}
-                        src={img.src}
-                        alt=""
-                        style={{
-                          position: 'absolute',
-                          left: `${img.x}px`,
-                          top: `${img.y}px`,
-                          width: `${img.width}px`,
-                          height: `${img.height}px`,
-                          objectFit: 'contain',
-                          pointerEvents: 'none',
-                          userSelect: 'none'
-                        }}
-                        draggable={false}
-                      />
-                    ))}
+                    {/* Çok Sayfalı Düzen - Her sayfa ayrı A4 */}
+                    {(() => {
+                      // Geçici div oluştur ve yüksekliği hesapla
+                      const tempDiv = document.createElement('div');
+                      tempDiv.style.width = '634px'; // 794 - 160 (padding)
+                      tempDiv.style.position = 'absolute';
+                      tempDiv.style.visibility = 'hidden';
+                      tempDiv.style.fontSize = previewData.styles?.fontSize || '14px';
+                      tempDiv.style.fontFamily = previewData.styles?.fontFamily || 'Arial';
+                      tempDiv.style.lineHeight = '1.6';
+                      tempDiv.innerHTML = previewData.contentHTML;
+                      document.body.appendChild(tempDiv);
+                      const contentHeight = tempDiv.scrollHeight;
+                      document.body.removeChild(tempDiv);
 
-                    {/* Header */}
-                    {previewData.headerContent && (
-                      <div
-                        className="p-8 border-b-2 border-dashed border-gray-300"
-                        style={{
-                          fontSize: previewData.styles?.fontSize || '14px',
-                          fontFamily: previewData.styles?.fontFamily || 'Arial',
-                          color: '#000',
-                          lineHeight: '1.6'
-                        }}
-                        dangerouslySetInnerHTML={{ __html: previewData.headerContent }}
-                      />
-                    )}
+                      const pageHeight = 1123;
+                      const contentAreaHeight = pageHeight - 150; // 60 (top) + 90 (bottom)
+                      const numPages = Math.ceil(contentHeight / contentAreaHeight);
 
-                    {/* Content */}
-                    <div
-                      className="p-8"
-                      style={{
-                        fontSize: previewData.styles?.fontSize || '14px',
-                        fontFamily: previewData.styles?.fontFamily || 'Arial',
-                        color: '#000',
-                        lineHeight: '1.6',
-                        minHeight: '600px'
-                      }}
-                      dangerouslySetInnerHTML={{ __html: previewData.contentHTML }}
-                    />
+                      console.log(`📄 İçerik yüksekliği: ${contentHeight}px, ${numPages} sayfa`);
 
-                    {/* Footer */}
-                    {previewData.footerContent && (
-                      <div
-                        className="p-8 border-t-2 border-dashed border-gray-300"
-                        style={{
-                          fontSize: previewData.styles?.fontSize || '14px',
-                          fontFamily: previewData.styles?.fontFamily || 'Arial',
-                          color: '#000',
-                          lineHeight: '1.6'
-                        }}
-                        dangerouslySetInnerHTML={{ __html: previewData.footerContent }}
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
+                      return Array.from({ length: Math.max(1, numPages) }).map((_, pageIndex) => (
+                        <div
+                          key={pageIndex}
+                          className="a4-page"
+                          style={{
+                            marginBottom: pageIndex < numPages - 1 ? '20px' : '0',
+                            padding: '60px 80px 90px 80px' // Tüm sayfalarda aynı padding
+                          }}
+                        >
+                          {/* Görseller sadece ilk sayfada */}
+                          {pageIndex === 0 && previewData.images?.map((img: TemplateImage) => (
+                            <img
+                              key={img.id}
+                              src={img.src}
+                              alt=""
+                              style={{
+                                position: 'absolute',
+                                left: `${img.x}px`,
+                                top: `${img.y}px`,
+                                width: `${img.width}px`,
+                                height: `${img.height}px`,
+                                objectFit: 'contain',
+                                pointerEvents: 'none',
+                                userSelect: 'none',
+                                zIndex: 1
+                              }}
+                              draggable={false}
+                            />
+                          ))}
+
+                          {/* İçerik - Her sayfada doğru dilim göster */}
+                          <div
+                            style={{
+                              fontSize: previewData.styles?.fontSize || '14px',
+                              fontFamily: previewData.styles?.fontFamily || 'Arial',
+                              color: '#000',
+                              lineHeight: '1.6',
+                              position: 'relative',
+                              zIndex: 2,
+                              height: `${contentAreaHeight}px`,
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <div
+                              style={{
+                                transform: `translateY(-${pageIndex * contentAreaHeight}px)`
+                              }}
+                              dangerouslySetInnerHTML={{ __html: previewData.contentHTML }}
+                            />
+                          </div>
+
+                          {/* Sayfa numarası */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              bottom: '30px',
+                              right: '80px',
+                              fontSize: '10px',
+                              color: '#999',
+                              zIndex: 10
+                            }}
+                          >
+                            Sayfa {pageIndex + 1} / {numPages}
+                          </div>
+                        </div>
+                      ));
+                    })()}
+                  </div> {/* Close pdf-canvas */}
+                </div> {/* Close preview content */}
+              </div> {/* Close modal */}
             </div>
           </>,
           document.body

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Mail, Lock, AlertCircle, Moon, Sun, CheckCircle, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import Loader from '@/components/Loader';
 
 // Mascot removed per request — logo will be shown in the header area instead.
 
@@ -67,64 +68,13 @@ export default function LoginPage() {
     }
   };
 
-  // Auth yüklenirken loading göster - Windows 11 Style
+  // Auth yüklenirken loading göster
   if (authLoading) {
     return (
-      <div className={`min-h-screen flex flex-col items-center justify-center ${isDark ? 'bg-gradient-to-br from-[#0f0f0f] via-[#1a1a1a] to-[#0f0f0f]' : 'bg-gradient-to-br from-blue-50 via-white to-blue-50'} relative overflow-hidden`}>
-        {/* Background Blur Circles */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className={`absolute -top-1/2 -left-1/2 w-full h-full rounded-full blur-3xl opacity-20 ${isDark ? 'bg-blue-600' : 'bg-blue-400'}`}></div>
-          <div className={`absolute -bottom-1/2 -right-1/2 w-full h-full rounded-full blur-3xl opacity-20 ${isDark ? 'bg-purple-600' : 'bg-purple-400'}`}></div>
-        </div>
-
+      <div className="min-h-screen bg-[#2a2a2a] flex flex-col items-center justify-center relative overflow-hidden">
         {/* Loading Content */}
-        <div className="relative z-10 flex flex-col items-center gap-8">
-          {/* Logo */}
-          <div className="inline-flex items-center justify-center w-24 h-24 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 p-0.5 animate-pulse">
-            <div className="w-full h-full rounded-2xl bg-white flex items-center justify-center">
-              <img src="/logo.png" alt="Ayka Logo" className="w-16 h-16 object-contain" />
-            </div>
-          </div>
-
-          {/* Loading Spinner */}
-          <div className="relative w-20 h-20">
-            {/* Outer glow */}
-            <div className={`absolute inset-0 rounded-full blur-xl ${isDark ? 'bg-blue-500/30' : 'bg-blue-400/40'} animate-pulse`}></div>
-            
-            {/* Spinning ring */}
-            <div className="absolute inset-0">
-              <div className="w-full h-full rounded-full border-4 border-transparent bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 animate-spin [animation-duration:1.5s]"
-                style={{ 
-                  WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
-                  WebkitMaskComposite: 'xor',
-                  maskComposite: 'exclude',
-                  padding: '4px'
-                }}
-              ></div>
-            </div>
-            
-            {/* Center dot */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse"></div>
-            </div>
-          </div>
-
-          {/* Text */}
-          <div className="flex flex-col items-center gap-3">
-            <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Ayka Matrix
-            </h2>
-            <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-600'} animate-pulse`}>
-              Yükleniyor
-            </p>
-            
-            {/* Animated dots */}
-            <div className="flex gap-1">
-              <div className={`w-2 h-2 rounded-full ${isDark ? 'bg-blue-400' : 'bg-blue-500'} animate-bounce [animation-delay:-0.3s]`}></div>
-              <div className={`w-2 h-2 rounded-full ${isDark ? 'bg-purple-400' : 'bg-purple-500'} animate-bounce [animation-delay:-0.15s]`}></div>
-              <div className={`w-2 h-2 rounded-full ${isDark ? 'bg-blue-400' : 'bg-blue-500'} animate-bounce`}></div>
-            </div>
-          </div>
+        <div className="relative z-10">
+          <Loader />
         </div>
       </div>
     );
