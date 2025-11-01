@@ -48,6 +48,24 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Mobile viewport and safe area support */
+body {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
+}
+
+html {
+  height: -webkit-fill-available;
+}
+
+/* Ensure proper mobile rendering */
+@supports (-webkit-touch-callout: none) {
+  body {
+    /* iOS Safari */
+    min-height: -webkit-fill-available;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

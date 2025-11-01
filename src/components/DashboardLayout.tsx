@@ -200,7 +200,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <div className="flex flex-1 overflow-hidden relative">
           {/* Main Content - Modern Design */}
           <main className={`
-            w-full overflow-y-auto transition-all duration-500 relative pb-20 sm:pb-24
+            w-full overflow-y-auto transition-all duration-500 relative pb-24 sm:pb-28 md:pb-24
             ${isDark 
               ? 'bg-gradient-to-br from-gray-900/60 via-gray-800/50 to-gray-900/60' 
               : 'bg-gradient-to-br from-white/60 via-gray-50/50 to-white/60'
@@ -395,12 +395,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           )}
 
           {/* Windows Taskbar Style - Alt - Desktop */}
-          <div className="fixed bottom-0 left-0 right-0 z-[100]">
+          <div className="fixed bottom-0 left-0 right-0 z-[9999]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
             <div className={cn(
-              'flex items-center justify-between px-2 sm:px-3 py-1.5 sm:py-2 border-t',
+              'flex items-center justify-between px-2 sm:px-3 py-2 sm:py-2.5 border-t',
               isDark 
-                ? 'bg-gray-900/95 border-gray-700/50' 
-                : 'bg-gray-100/95 border-gray-300/50',
+                ? 'bg-gray-900/98 border-gray-700/50' 
+                : 'bg-gray-100/98 border-gray-300/50',
               'backdrop-blur-2xl shadow-2xl'
             )}>
               {/* Sol - Logo + Mobile Menu Button */}
