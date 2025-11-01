@@ -21,7 +21,8 @@ import {
   Terminal,
   X,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Menu
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -61,6 +62,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [showProfileInfo, setShowProfileInfo] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -281,7 +283,118 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             </div>
           </main>
 
-          {/* Windows Taskbar Style - Alt - Mobile Responsive */}
+          {/* Mobile Menu Overlay */}
+          {mobileMenuOpen && (
+            <div 
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[150] md:hidden"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              <div 
+                className={cn(
+                  'absolute bottom-0 left-0 right-0 rounded-t-3xl p-6 max-h-[80vh] overflow-y-auto',
+                  isDark 
+                    ? 'bg-gray-900/98 border-t border-gray-700/50' 
+                    : 'bg-white/98 border-t border-gray-300/50',
+                  'backdrop-blur-2xl shadow-2xl animate-in slide-in-from-bottom duration-300'
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className={cn(
+                    'text-xl font-bold',
+                    isDark ? 'text-white' : 'text-gray-900'
+                  )}>
+                    Menü
+                  </h2>
+                  <button
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={cn(
+                      'p-2 rounded-lg transition-colors',
+                      isDark 
+                        ? 'text-gray-400 hover:bg-gray-800 hover:text-white' 
+                        : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
+                    )}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                  {filteredMenuItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.href;
+
+                    return (
+                      <button
+                        key={item.href}
+                        onClick={() => {
+                          startNavigation();
+                          router.push(item.href);
+                          setMobileMenuOpen(false);
+                        }}
+                        className={cn(
+                          'flex flex-col items-center gap-3 p-4 rounded-2xl transition-all duration-200',
+                          isActive
+                            ? isDark 
+                              ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30' 
+                              : 'bg-blue-500 text-white shadow-lg shadow-blue-500/30'
+                            : isDark
+                              ? 'bg-gray-800/50 text-gray-300 hover:bg-gray-800'
+                              : 'bg-gray-100/50 text-gray-700 hover:bg-gray-200'
+                        )}
+                      >
+                        <Icon className="w-7 h-7" />
+                        <span className="text-sm font-medium text-center">{item.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* User Info in Mobile Menu */}
+                <div className={cn(
+                  'p-4 rounded-2xl mb-3',
+                  isDark ? 'bg-gray-800/50' : 'bg-gray-100/50'
+                )}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+                      <User className="w-6 h-6 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className={cn(
+                        'text-sm font-semibold',
+                        isDark ? 'text-gray-100' : 'text-gray-900'
+                      )}>
+                        {user?.PersonelInfo?.P_AdSoyad || 'Kullanıcı'}
+                      </p>
+                      <p className={cn(
+                        'text-xs',
+                        isDark ? 'text-gray-400' : 'text-gray-600'
+                      )}>
+                        {getRoleLabel(user?.PersonelRole || '')}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      handleSignOut();
+                      setMobileMenuOpen(false);
+                    }}
+                    className={cn(
+                      'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors',
+                      isDark 
+                        ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' 
+                        : 'bg-red-50 text-red-600 hover:bg-red-100'
+                    )}
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="text-sm font-medium">Çıkış Yap</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Windows Taskbar Style - Alt - Desktop */}
           <div className="fixed bottom-0 left-0 right-0 z-[100]">
             <div className={cn(
               'flex items-center justify-between px-2 sm:px-3 py-1.5 sm:py-2 border-t',
@@ -290,14 +403,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 : 'bg-gray-100/95 border-gray-300/50',
               'backdrop-blur-2xl shadow-2xl'
             )}>
-              {/* Sol - Logo (logo-only, no bg or text) */}
-              <div className="flex items-center flex-shrink-0">
+              {/* Sol - Logo + Mobile Menu Button */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {/* Mobile Menu Button - Only on small screens */}
+                <button
+                  onClick={() => setMobileMenuOpen(true)}
+                  className={cn(
+                    'md:hidden p-1.5 rounded-lg transition-colors',
+                    isDark 
+                      ? 'text-gray-400 hover:bg-gray-800 hover:text-white' 
+                      : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
+                  )}
+                  title="Menü"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
                 {/* Constrain logo to taskbar sizes so it doesn't resize the bar. Use different image for dark mode if provided. */}
                 <img src={isDark ? '/logoLGT.png' : '/logo.png'} alt="Ayka Logo" className=" h-6 sm:h-9 " />
               </div>
 
-              {/* Orta - Menü Items - Scrollable on Mobile */}
-              <div className="flex-1 overflow-x-auto overflow-y-hidden mx-1 sm:mx-2 scrollbar-hide">
+              {/* Orta - Menü Items - Hidden on Mobile, Show on Desktop */}
+              <div className="hidden md:flex flex-1 overflow-x-auto overflow-y-hidden mx-1 sm:mx-2 scrollbar-hide">
                 <div className="flex items-center justify-center gap-0.5 sm:gap-1 min-w-max w-full">
                   {filteredMenuItems.map((item) => {
                     const Icon = item.icon;
@@ -323,7 +449,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         title={item.name}
                       >
                         <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
-                        <span className="text-[8px] sm:text-[9px] font-medium hidden xs:block">{item.name}</span>
+                        <span className="text-[8px] sm:text-[9px] font-medium">{item.name}</span>
                         
                         {/* Active indicator - Alt çizgi */}
                         {isActive && (
@@ -333,6 +459,28 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Mobile - Current Page Indicator */}
+              <div className="flex-1 flex items-center justify-center md:hidden">
+                {filteredMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.href;
+                  if (!isActive) return null;
+
+                  return (
+                    <div 
+                      key={item.href}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 rounded-lg',
+                        isDark ? 'text-blue-400' : 'text-blue-600'
+                      )}
+                    >
+                      <Icon className="w-4 h-4" />
+                      <span className="text-xs font-medium">{item.name}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Sağ - User Panel + Tema + Saat */}
