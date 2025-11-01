@@ -173,6 +173,23 @@ body {
   animation: scale-in 0.3s ease-out;
 }
 
+/* Slide in from bottom for mobile bottom sheet */
+@keyframes slide-in-from-bottom {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-in-from-bottom {
+  animation: slide-in-from-bottom 320ms cubic-bezier(.22,.9,.33,1) both;
+  will-change: transform, opacity;
+}
+
 /* Smooth transitions for all interactive elements */
 button, a, input, select, textarea {
   transition: all 0.2s ease-in-out;

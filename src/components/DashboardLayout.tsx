@@ -199,14 +199,18 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         {/* Content Area - Main */}
         <div className="flex flex-1 overflow-hidden relative">
           {/* Main Content - Modern Design */}
-          <main className={`
-            w-full overflow-y-auto transition-all duration-500 relative pb-24 sm:pb-28 md:pb-24
-            ${isDark 
-              ? 'bg-gradient-to-br from-gray-900/60 via-gray-800/50 to-gray-900/60' 
-              : 'bg-gradient-to-br from-white/60 via-gray-50/50 to-white/60'
-            }
-            backdrop-blur-md
-          `}>
+          <main
+            className={`
+              w-full overflow-y-auto transition-all duration-500 relative pb-24 sm:pb-28 md:pb-24
+              ${isDark 
+                ? 'bg-gradient-to-br from-gray-900/60 via-gray-800/50 to-gray-900/60' 
+                : 'bg-gradient-to-br from-white/60 via-gray-50/50 to-white/60'
+              }
+              backdrop-blur-md
+            `}
+            // make sure main content is padded above mobile browser UI (home indicator)
+            style={{ paddingBottom: `calc(6rem + env(safe-area-inset-bottom))` }}
+          >
             {/* Navigation Loading Overlay - Windows 11 Style */}
             {isNavigating && (
               <div className={`
@@ -295,9 +299,11 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   isDark 
                     ? 'bg-gray-900/98 border-t border-gray-700/50' 
                     : 'bg-white/98 border-t border-gray-300/50',
-                  'backdrop-blur-2xl shadow-2xl animate-in slide-in-from-bottom duration-300'
+                  'backdrop-blur-2xl shadow-2xl slide-in-from-bottom'
                 )}
                 onClick={(e) => e.stopPropagation()}
+                  // ensure mobile panel content respects safe-area (home indicator)
+                  style={{ paddingBottom: `calc(1rem + env(safe-area-inset-bottom))` }}
               >
                 <div className="flex items-center justify-between mb-6">
                   <h2 className={cn(
@@ -395,7 +401,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           )}
 
           {/* Windows Taskbar Style - Alt - Desktop */}
-          <div className="fixed bottom-0 left-0 right-0 z-[9999]" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+          <div className="fixed left-0 right-0 z-[9999]" style={{ bottom: 'env(safe-area-inset-bottom)', paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
             <div className={cn(
               'flex items-center justify-between px-2 sm:px-3 py-2 sm:py-2.5 border-t',
               isDark 
