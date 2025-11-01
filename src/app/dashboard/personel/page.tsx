@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { createClient } from '@/lib/supabase/client';
 import { PersonelLevelizasyon, PersonelInfo, BolgeInfo, UserRole } from '@/types/database';
-import { Users, Plus, Edit, Trash2, Search, X, Eye } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, Search, X, Eye, CalendarPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -21,6 +22,7 @@ interface FullPersonel extends PersonelLevelizasyon {
 export default function PersonelPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
+  const router = useRouter();
   const [personeller, setPersoneller] = useState<FullPersonel[]>([]);
   const [bolgeler, setBolgeler] = useState<BolgeInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -272,6 +274,17 @@ export default function PersonelPage() {
         fetchPersoneller();
       }
     }
+  };
+
+  const handleCreateIzin = (personel: FullPersonel) => {
+    console.log('🚀 İzin oluşturma başlatılıyor:', {
+      PersonelTcKimlik: personel.PersonelTcKimlik,
+      PersonelAdSoyad: personel.PersonelInfo?.P_AdSoyad,
+      type: typeof personel.PersonelTcKimlik
+    });
+    
+    // İzin talepleri sayfasına yönlendir ve personel bilgisini query params ile gönder
+    router.push(`/dashboard/izin-talepleri?createFor=${personel.PersonelTcKimlik}&name=${encodeURIComponent(personel.PersonelInfo?.P_AdSoyad || '')}`);
   };
 
   const toggleAktif = async (personel: FullPersonel) => {
@@ -626,6 +639,24 @@ export default function PersonelPage() {
                             >
                               <Eye className="w-4 h-4" />
                             </button>
+
+                            {/* İzin Oluştur - Koordinatör, Yönetici ve İK */}
+                            {(user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') && (
+                              <button
+                                onClick={() => handleCreateIzin(personel)}
+                                className={`
+                                  p-2.5 rounded-xl transition-all transform hover:scale-110
+                                  ${isDark 
+                                    ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30 border border-green-500/30' 
+                                    : 'bg-green-50 text-green-600 hover:bg-green-100 border border-green-200'
+                                  }
+                                `}
+                                title="İzin Oluştur"
+                              >
+                                <CalendarPlus className="w-4 h-4" />
+                              </button>
+                            )}
+
                             {canAddPersonel && (
                               <>
                                 <button

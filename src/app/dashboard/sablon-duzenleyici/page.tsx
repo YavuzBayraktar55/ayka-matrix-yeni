@@ -30,6 +30,7 @@ const PLACEHOLDERS_IZIN = [
   { key: '{izin_bitis}', label: 'İzin Bitiş', example: '15.06.2024' },
   { key: '{izin_gun}', label: 'İzin Gün Sayısı', example: '14' },
   { key: '{izin_turu}', label: 'İzin Türü', example: 'Yıllık İzin' },
+  { key: '{izin_hazirlama_tarihi}', label: 'İzin Hazırlama Tarihi (Başlangıçtan 1 Gün Önce)', example: '31.05.2024' },
 ];
 
 const PLACEHOLDERS_AVANS = [
@@ -85,7 +86,6 @@ function SablonDuzenleyiciContent() {
   const [currentTemplateId, setCurrentTemplateId] = useState<number | null>(null);
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
   const [showTemplateList, setShowTemplateList] = useState(false);
-  const [activeSection] = useState<'content'>('content'); // Sadece content editlenebilir
   const [showPlaceholderMenu, setShowPlaceholderMenu] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [currentColor, setCurrentColor] = useState('#000000');
@@ -192,7 +192,6 @@ function SablonDuzenleyiciContent() {
     }
     
     setShowPlaceholderMenu(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Resim yükle
@@ -391,7 +390,7 @@ function SablonDuzenleyiciContent() {
 
   // Çizgi ekle
   const insertLine = () => {
-    execCommand('insertHTML', '<hr style="border: 1px solid #ccc; margin: 10px 0;">');
+    execCommand('insertHTML', '<hr style="border: none; border-top: 2px solid #333; margin: 20px 0; width: 100%;">');
   };
 
   // Kayıtlı şablonları getir
@@ -650,7 +649,7 @@ function SablonDuzenleyiciContent() {
       <DashboardLayout>
         <div className={cn(
           'min-h-screen p-6',
-          isDark ? 'bg-gray-900' : 'bg-gray-50'
+          'bg-transparent'
         )}>
           {/* Header */}
           <div className="mb-6">
@@ -854,6 +853,8 @@ function SablonDuzenleyiciContent() {
               >
                 <Minus className="w-5 h-5" />
               </button>
+
+              <div className="w-px h-8 bg-gray-300 dark:bg-gray-700" />
 
               {/* Image Upload */}
               <button
@@ -1202,10 +1203,11 @@ function SablonDuzenleyiciContent() {
               suppressContentEditableWarning
             />
             
-            {/* Sayfa sınırı göstergeleri - Her 1123px'de */}
+            {/* Sayfa sınırı göstergeleri */}
             {(() => {
-              const editorHeight = contentRef.current?.scrollHeight || 1123;
-              const numDividers = Math.floor(editorHeight / 1123);
+              const pageHeight = 1123;
+              const editorHeight = contentRef.current?.scrollHeight || pageHeight;
+              const numDividers = Math.floor(editorHeight / pageHeight);
               return Array.from({ length: numDividers }).map((_, i) => (
                 <div
                   key={i}
@@ -1213,7 +1215,7 @@ function SablonDuzenleyiciContent() {
                     position: 'absolute',
                     left: '40px',
                     right: '40px',
-                    top: `${(i + 1) * 1123}px`,
+                    top: `${(i + 1) * pageHeight}px`,
                     height: '1px',
                     background: 'repeating-linear-gradient(to right, #d0d0d0 0px, #d0d0d0 10px, transparent 10px, transparent 20px)',
                     pointerEvents: 'none',
@@ -1223,17 +1225,133 @@ function SablonDuzenleyiciContent() {
               ));
             })()}
             
+            {/* Crop Marks (+ işaretleri) - Her sayfanın 4 köşesi */}
+            {(() => {
+              const pageHeight = 1123;
+              const editorHeight = contentRef.current?.scrollHeight || pageHeight;
+              const totalPages = Math.ceil(editorHeight / pageHeight);
+              const markSize = 20; // + işaretinin uzunluğu
+              const markThickness = 2; // + işaretinin kalınlığı
+              const offset = 10; // Sayfa kenarından uzaklık
+              
+              return Array.from({ length: totalPages }).map((_, pageIndex) => {
+                const pageTop = pageIndex * pageHeight;
+                const pageBottom = (pageIndex + 1) * pageHeight;
+                
+                return (
+                  <div key={`crop-marks-${pageIndex}`}>
+                    {/* Sol Üst Köşe - + işareti */}
+                    {/* Dikey çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      left: `${offset}px`,
+                      top: `${pageTop + offset - markSize/2}px`,
+                      width: `${markThickness}px`,
+                      height: `${markSize}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    {/* Yatay çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      left: `${offset - markSize/2}px`,
+                      top: `${pageTop + offset}px`,
+                      width: `${markSize}px`,
+                      height: `${markThickness}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    
+                    {/* Sağ Üst Köşe - + işareti */}
+                    {/* Dikey çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      right: `${offset}px`,
+                      top: `${pageTop + offset - markSize/2}px`,
+                      width: `${markThickness}px`,
+                      height: `${markSize}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    {/* Yatay çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      right: `${offset - markSize/2}px`,
+                      top: `${pageTop + offset}px`,
+                      width: `${markSize}px`,
+                      height: `${markThickness}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    
+                    {/* Sol Alt Köşe - + işareti */}
+                    {/* Dikey çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      left: `${offset}px`,
+                      top: `${pageBottom - offset - markSize/2}px`,
+                      width: `${markThickness}px`,
+                      height: `${markSize}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    {/* Yatay çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      left: `${offset - markSize/2}px`,
+                      top: `${pageBottom - offset}px`,
+                      width: `${markSize}px`,
+                      height: `${markThickness}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    
+                    {/* Sağ Alt Köşe - + işareti */}
+                    {/* Dikey çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      right: `${offset}px`,
+                      top: `${pageBottom - offset - markSize/2}px`,
+                      width: `${markThickness}px`,
+                      height: `${markSize}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                    {/* Yatay çizgi */}
+                    <div style={{
+                      position: 'absolute',
+                      right: `${offset - markSize/2}px`,
+                      top: `${pageBottom - offset}px`,
+                      width: `${markSize}px`,
+                      height: `${markThickness}px`,
+                      backgroundColor: '#000',
+                      pointerEvents: 'none',
+                      zIndex: 10
+                    }} />
+                  </div>
+                );
+              });
+            })()}
+            
             {/* Sayfa numaraları */}
             {(() => {
-              const editorHeight = contentRef.current?.scrollHeight || 1123;
-              const totalPages = Math.ceil(editorHeight / 1123);
+              const pageHeight = 1123;
+              const editorHeight = contentRef.current?.scrollHeight || pageHeight;
+              const totalPages = Math.ceil(editorHeight / pageHeight);
               return Array.from({ length: totalPages }).map((_, i) => (
                 <div
                   key={`page-${i}`}
                   style={{
                     position: 'absolute',
                     bottom: i === totalPages - 1 ? '30px' : 'auto',
-                    top: i < totalPages - 1 ? `${(i + 1) * 1123 - 50}px` : 'auto',
+                    top: i < totalPages - 1 ? `${(i + 1) * pageHeight - 50}px` : 'auto',
                     right: '80px',
                     fontSize: '10px',
                     color: '#999',
@@ -1266,7 +1384,6 @@ function SablonDuzenleyiciContent() {
               <li>• Değişken butonundan {'{personel_adi}'}, {'{tc_no}'} gibi otomatik alanlar ekleyebilirsiniz</li>
               <li>• Resimleri tıklayarak seçin, köşelerinden/kenarlarından boyutlandırın</li>
               <li>• <strong>Çok sayfalı içerik:</strong> İçerik uzunsa önizlemede ve PDF&apos;de otomatik olarak yeni A4 sayfalarına bölünür</li>
-              <li>• Her sayfa 1123px yüksekliğinde (A4 boyutu) - içerik taşarsa yeni sayfa oluşturulur</li>
               <li>• Şablonunuz veritabanına kaydedilir ve evrak oluştururken kullanılır</li>
             </ul>
           </div>

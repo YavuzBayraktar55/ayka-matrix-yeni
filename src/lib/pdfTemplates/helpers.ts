@@ -14,19 +14,25 @@ export const turkishToEnglish = (text: string): string => {
   return text.split('').map(char => charMap[char] || char).join('');
 };
 
-// Görsel yükleme yardımcı fonksiyonu
+// Görsel yükleme yardımcı fonksiyonu - Yüksek kalite
 export const loadImage = (url: string): Promise<string> => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
+      // Daha yüksek çözünürlük için 2x boyutlandırma
+      const scaleFactor = 2;
+      canvas.width = img.width * scaleFactor;
+      canvas.height = img.height * scaleFactor;
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
+        // Görsel kalitesini artırmak için ayarlar
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Maksimum kalite ile PNG'ye çevir
+        resolve(canvas.toDataURL('image/png', 1.0));
       } else {
         reject(new Error('Canvas context alınamadı'));
       }
@@ -44,12 +50,13 @@ export const addHeaderFooter = async (
 ): Promise<void> => {
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  // Logo ekleme
+  // Logo ekleme - Yüksek kalitede
   try {
     const logoImg = await loadImage('/logo.png');
     const logoSize = 30;
     const logoX = (pageWidth - logoSize) / 2;
-    doc.addImage(logoImg, 'PNG', logoX, 15, logoSize, logoSize, undefined, 'FAST');
+    // 'SLOW' kompresyon kullanarak daha yüksek kalite
+    doc.addImage(logoImg, 'PNG', logoX, 15, logoSize, logoSize, undefined, 'SLOW');
   } catch (error) {
     console.error('Logo yuklenemedi:', error);
   }

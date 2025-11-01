@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams, useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { createClient } from '@/lib/supabase/client';
@@ -25,9 +26,12 @@ interface FullIzinTalep extends IzinTalepleri {
   };
 }
 
-export default function IzinTalepleriPage() {
+function IzinTalepleriContent() {
   const { user } = useAuth();
   const { isDark } = useTheme();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  
   const [talepler, setTalepler] = useState<FullIzinTalep[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,13 +45,25 @@ export default function IzinTalepleriPage() {
   const [editDateModalOpen, setEditDateModalOpen] = useState(false);
   const [gecmis, setGecmis] = useState<IzinTalepGecmis[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  
+  // Personel için izin oluşturma bilgileri
+  const [creatingForPersonel, setCreatingForPersonel] = useState<{
+    tcKimlik: string;
+    adSoyad: string;
+  } | null>(null);
 
   const [formData, setFormData] = useState({
-    IzinTuru: 'ucretli' as IzinTuru,
+    IzinTuru: 'yillik' as IzinTuru,
     BaslangicTarihi: '',
     BitisTarihi: '',
     Aciklama: '',
   });
+
+  const [izinHesapBilgisi, setIzinHesapBilgisi] = useState<{
+    toplamGun: number;
+    calismaGunu: number;
+    tatilGunSayisi: number;
+  } | null>(null);
 
   const [onayFormData, setOnayFormData] = useState({
     isApprove: true,
@@ -63,6 +79,74 @@ export default function IzinTalepleriPage() {
   useEffect(() => {
     fetchTalepler();
   }, []);
+
+  // Query params'dan personel bilgisini kontrol et
+  useEffect(() => {
+    const createFor = searchParams.get('createFor');
+    const name = searchParams.get('name');
+    
+    console.log('🔗 Query params kontrol ediliyor:', { createFor, name, hasUser: !!user });
+    
+    if (createFor && name) {
+      // Koordinatör veya yönetici kontrolü
+      if (user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') {
+        console.log('✅ Personel için izin oluşturma modu aktif:', {
+          tcKimlik: createFor,
+          adSoyad: name,
+          role: user.PersonelRole
+        });
+        
+        setCreatingForPersonel({
+          tcKimlik: createFor,
+          adSoyad: name
+        });
+        setModalOpen(true);
+        
+        // URL'den parametreleri temizle
+        router.replace('/dashboard/izin-talepleri');
+      }
+    }
+  }, [searchParams, user, router]);
+
+  // Form tarihlerini değiştiğinde izin hesabını güncelle
+  useEffect(() => {
+    const hesaplaIzin = async () => {
+      const targetTcKimlik = creatingForPersonel?.tcKimlik || user?.PersonelTcKimlik?.toString();
+      
+      console.log('🧮 İzin hesaplama useEffect çalıştı:', {
+        creatingForPersonel: !!creatingForPersonel,
+        targetTcKimlik,
+        hasDates: !!(formData.BaslangicTarihi && formData.BitisTarihi)
+      });
+      
+      if (formData.BaslangicTarihi && formData.BitisTarihi && targetTcKimlik) {
+        try {
+          console.log('⏳ calculateWorkingDays çağrılıyor...', {
+            tcKimlik: targetTcKimlik,
+            baslangic: formData.BaslangicTarihi,
+            bitis: formData.BitisTarihi
+          });
+          
+          const hesap = await calculateWorkingDays(
+            targetTcKimlik,
+            formData.BaslangicTarihi,
+            formData.BitisTarihi
+          );
+          
+          console.log('✅ İzin hesaplama başarılı:', hesap);
+          setIzinHesapBilgisi(hesap);
+        } catch (error) {
+          console.error('❌ İzin hesaplama hatası:', error);
+          setIzinHesapBilgisi(null);
+        }
+      } else {
+        setIzinHesapBilgisi(null);
+      }
+    };
+    
+    hesaplaIzin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.BaslangicTarihi, formData.BitisTarihi, user?.PersonelTcKimlik, creatingForPersonel]);
 
   const fetchTalepler = async () => {
     setLoading(true);
@@ -98,12 +182,136 @@ export default function IzinTalepleriPage() {
     setLoading(false);
   };
 
+  // Tatil günlerini tespit et (puantaj tablosundan)
+  const fetchTatilGunleri = async (personelId: string, baslangic: string, bitis: string): Promise<string[]> => {
+    try {
+      console.log('🔍 Tatil günleri kontrol ediliyor:', { personelId, baslangic, bitis });
+      
+      const startDate = new Date(baslangic);
+      const endDate = new Date(bitis);
+      
+      // Puantaj tablosundan ilgili ayların verilerini al
+      const aylar = new Set<string>();
+      for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        // YilAy formatı: "2025-01" gibi
+        aylar.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+      
+      console.log('📅 Kontrol edilecek aylar:', Array.from(aylar));
+      
+      // Kullanıcının BolgeID'sini al
+      console.log('🔍 Personel TC sorgulanıyor:', { 
+        personelId, 
+        type: typeof personelId,
+        value: personelId,
+        asNumber: Number(personelId)
+      });
+      
+      // PersonelTcKimlik bigint olabilir, number'a çevir
+      const tcAsNumber = typeof personelId === 'string' ? Number(personelId) : personelId;
+      
+      // .single() yerine .maybeSingle() kullan - birden fazla kayıt varsa hata vermez
+      const { data: userData, error: userError } = await supabase
+        .from('PersonelLevelizasyon')
+        .select('BolgeID, PersonelTcKimlik, PersonelInfo(P_AdSoyad)')
+        .eq('PersonelTcKimlik', tcAsNumber)
+        .maybeSingle();
+      
+      console.log('👤 Kullanıcı bilgisi:', { 
+        personelId, 
+        userData, 
+        userError,
+        errorDetails: userError?.message,
+        errorHint: userError?.hint
+      });
+      
+      if (!userData?.BolgeID) {
+        console.error('❌ Personel bölge bilgisi bulunamadı:', {
+          personelId,
+          userData,
+          error: userError?.message
+        });
+        // Bölge bilgisi bulunamadığında boş array döndür (tatil yok demek)
+        console.warn('⚠️ Bölge bilgisi olmadan devam ediliyor - tatil günleri hesaplanamayacak');
+        return [];
+      }
+      
+      // Tatil günlerini tespit et
+      const tatilGunleri: string[] = [];
+      
+      for (const yilAy of Array.from(aylar)) {
+        const { data, error } = await supabase
+          .from('AylikPuantaj')
+          .select('TakvimJSON, SablonlarJSON')
+          .eq('BolgeID', userData.BolgeID)
+          .eq('YilAy', yilAy)
+          .single();
+        
+        console.log(`📊 ${yilAy} puantaj verisi:`, { data, error });
+        
+        if (!error && data) {
+          // TakvimJSON: { "2025-10-01": { "isim": "Tam Gün", "baslangic": "08:00", "bitis": "18:00", "mola": 90 } }
+          // Tatil günleri: { "isim": "Resmi Tatil", "baslangic": null, "bitis": null, "mola": 0 }
+          const takvim = typeof data.TakvimJSON === 'string' 
+            ? JSON.parse(data.TakvimJSON) 
+            : data.TakvimJSON || {};
+          
+          console.log('🗓️ Takvim parse edildi, örnek günler:', Object.keys(takvim).slice(0, 5));
+          
+          // Tarih aralığındaki her gün için kontrol et
+          for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            const tarihStr = d.toISOString().split('T')[0];
+            
+            // Sadece bu ayın tarihlerini kontrol et
+            if (tarihStr.startsWith(yilAy)) {
+              const gunBilgi = takvim[tarihStr];
+              
+              console.log(`📆 ${tarihStr}:`, gunBilgi);
+              
+              // Gün bilgisi yoksa veya başlangıç/bitiş saati null ise = tatil
+              if (!gunBilgi) {
+                console.log(`❌ ${tarihStr} - Gün bilgisi yok, tatil sayılıyor`);
+                tatilGunleri.push(tarihStr);
+              } else if (gunBilgi.baslangic === null || gunBilgi.bitis === null) {
+                // Resmi Tatil veya Hafta Tatili - baslangic ve bitis null
+                console.log(`🏖️ ${tarihStr} - ${gunBilgi.isim} (baslangic: ${gunBilgi.baslangic}, bitis: ${gunBilgi.bitis})`);
+                tatilGunleri.push(tarihStr);
+              } else {
+                console.log(`💼 ${tarihStr} - Çalışma günü (${gunBilgi.baslangic} - ${gunBilgi.bitis})`);
+              }
+            }
+          }
+        }
+      }
+      
+      console.log('✅ Toplam tatil günleri:', tatilGunleri);
+      return tatilGunleri;
+    } catch (error) {
+      console.error('❌ Tatil günleri alınırken hata:', error);
+      return [];
+    }
+  };
+
   const calculateDays = (start: string, end: string) => {
     const startDate = new Date(start);
     const endDate = new Date(end);
     const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
     return diffDays;
+  };
+
+  // Tatil günleri hariç izin günü hesapla
+  const calculateWorkingDays = async (personelId: string, start: string, end: string) => {
+    const toplamGun = calculateDays(start, end);
+    const tatilGunleri = await fetchTatilGunleri(personelId, start, end);
+    const calismaGunu = toplamGun - tatilGunleri.length;
+    
+    return {
+      toplamGun,
+      calismaGunu,
+      tatilGunSayisi: tatilGunleri.length,
+      tatilGunleri
+    };
   };
 
   const fetchGecmis = async (talepId: number) => {
@@ -162,21 +370,98 @@ export default function IzinTalepleriPage() {
 
     if (!user) return;
 
-    const gunSayisi = calculateDays(formData.BaslangicTarihi, formData.BitisTarihi);
+    // Personel için mi yoksa kendisi için mi izin oluşturuluyor?
+    const targetTcKimlik = creatingForPersonel ? creatingForPersonel.tcKimlik : user.PersonelTcKimlik;
+    const targetName = creatingForPersonel ? creatingForPersonel.adSoyad : user.PersonelInfo?.P_AdSoyad;
+
+    console.log('📝 İzin oluşturma başlatıldı:', {
+      creatingForPersonel: !!creatingForPersonel,
+      targetTcKimlik,
+      targetName,
+      type: typeof targetTcKimlik
+    });
+
+    // Tatil günleri hariç izin günü hesapla
+    const izinHesap = await calculateWorkingDays(
+      targetTcKimlik.toString(), 
+      formData.BaslangicTarihi, 
+      formData.BitisTarihi
+    );
+
+    // Açıklama kısmına tatil bilgisi ve oluşturan kişi bilgisi ekle
+    let aciklama = formData.Aciklama;
+    if (izinHesap.tatilGunSayisi > 0) {
+      aciklama += `\n\n📅 İzin Detayı: ${izinHesap.calismaGunu} gün izinli (${izinHesap.tatilGunSayisi} gün tatile denk geliyor)`;
+    }
+    if (creatingForPersonel) {
+      aciklama += `\n\n👤 ${user.PersonelInfo?.P_AdSoyad} tarafından ${targetName} için oluşturuldu`;
+    }
 
     const talepData = {
-      PersonelTcKimlik: user.PersonelTcKimlik,
+      PersonelTcKimlik: targetTcKimlik, // Supabase otomatik tip dönüşümü yapacak
       IzinTuru: formData.IzinTuru,
       BaslangicTarihi: formData.BaslangicTarihi,
       BitisTarihi: formData.BitisTarihi,
-      GunSayisi: gunSayisi,
-      Aciklama: formData.Aciklama,
+      GunSayisi: izinHesap.calismaGunu, // Tatil günleri hariç
+      Aciklama: aciklama,
       Durum: 'beklemede' as TalepDurum,
     };
 
-    const { data, error } = await supabase.from('IzinTalepleri').insert([talepData]).select().single();
+    console.log('💾 Database\'e gönderilen data:', talepData);
+    console.log('👤 İşlemi yapan kullanıcı:', {
+      PersonelTcKimlik: user.PersonelTcKimlik,
+      PersonelRole: user.PersonelRole,
+      isCreatingForAnother: !!creatingForPersonel
+    });
 
-    if (!error && data) {
+    // Eğer başkası adına oluşturuyorsa API kullan (RLS bypass için)
+    let data, error;
+    
+    if (creatingForPersonel) {
+      console.log('🔄 API route üzerinden izin oluşturuluyor...');
+      
+      try {
+        const response = await fetch('/api/izin-olustur', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            ...talepData,
+            CreatedBy: user.PersonelTcKimlik,
+            CreatedByRole: user.PersonelRole
+          }),
+        });
+
+        const result = await response.json();
+        
+        if (!response.ok) {
+          error = { message: result.error };
+          console.error('❌ API hatası:', result);
+        } else {
+          data = result.data;
+          console.log('✅ API başarılı:', data);
+        }
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : 'Bilinmeyen hata';
+        error = { message: errorMessage };
+        console.error('❌ Fetch hatası:', err);
+      }
+    } else {
+      // Kendisi için oluşturuyorsa direkt Supabase kullan
+      console.log('🔄 Direkt Supabase ile izin oluşturuluyor...');
+      const result = await supabase.from('IzinTalepleri').insert([talepData]).select().single();
+      data = result.data;
+      error = result.error;
+    }
+    
+    if (error) {
+      console.error('❌ İzin talebi oluşturma hatası:', error);
+      alert(`İzin talebi oluşturulamadı: ${error.message}`);
+      return;
+    }
+
+    if (data) {
       // Geçmişe kaydet
       await saveGecmis({
         TalepID: data.TalepID,
@@ -274,7 +559,14 @@ export default function IzinTalepleriPage() {
     
     if (!selectedTalep || !user) return;
 
-    const yeniGunSayisi = calculateDays(editDateFormData.BaslangicTarihi, editDateFormData.BitisTarihi);
+    // Tatil günleri hariç yeni izin günü hesapla
+    const yeniIzinHesap = await calculateWorkingDays(
+      selectedTalep.PersonelTcKimlik.toString(),
+      editDateFormData.BaslangicTarihi,
+      editDateFormData.BitisTarihi
+    );
+
+    const yeniGunSayisi = yeniIzinHesap.calismaGunu;
 
     const { error } = await supabase
       .from('IzinTalepleri')
@@ -287,8 +579,16 @@ export default function IzinTalepleriPage() {
       .eq('TalepID', selectedTalep.TalepID);
 
     if (!error) {
-      // Geçmişe kaydet
-      const notText = `Tarih değiştirildi: ${selectedTalep.BaslangicTarihi} - ${selectedTalep.BitisTarihi} → ${editDateFormData.BaslangicTarihi} - ${editDateFormData.BitisTarihi}. ${editDateFormData.DegisiklikNotu}`;
+      // Geçmişe kaydet - tatil bilgisi ile
+      let notText = `Tarih değiştirildi: ${selectedTalep.BaslangicTarihi} - ${selectedTalep.BitisTarihi} → ${editDateFormData.BaslangicTarihi} - ${editDateFormData.BitisTarihi}`;
+      
+      if (yeniIzinHesap.tatilGunSayisi > 0) {
+        notText += ` (${yeniGunSayisi} gün izinli, ${yeniIzinHesap.tatilGunSayisi} gün tatile denk geliyor)`;
+      }
+      
+      if (editDateFormData.DegisiklikNotu) {
+        notText += `. ${editDateFormData.DegisiklikNotu}`;
+      }
       
       await saveGecmis({
         TalepID: selectedTalep.TalepID,
@@ -328,26 +628,21 @@ export default function IzinTalepleriPage() {
   const closeModal = () => {
     setModalOpen(false);
     setFormData({
-      IzinTuru: 'ucretli',
+      IzinTuru: 'yillik',
       BaslangicTarihi: '',
       BitisTarihi: '',
       Aciklama: '',
     });
+    setIzinHesapBilgisi(null);
+    setCreatingForPersonel(null); // Personel bilgisini temizle
   };
 
   const getIzinTuruLabel = (tur: string) => {
     const labels: Record<string, string> = {
-      // Yeni değerler
+      'yillik': 'Yıllık İzin',
       'ucretli': 'Ücretli İzin',
       'ucretsiz': 'Ücretsiz İzin',
-      'raporlu': 'Raporlu İzin',
-      // Eski değerler (geçici uyumluluk)
-      'yillik': 'Yıllık İzin (Ücretli)',
-      'mazeret': 'Mazeret İzni (Ücretli)',
-      'hastalik': 'Hastalık İzni (Raporlu)',
-      'dogum': 'Doğum İzni (Raporlu)',
-      'vefat': 'Vefat İzni (Raporlu)',
-      'evlilik': 'Evlilik İzni (Ücretli)'
+      'raporlu': 'Raporlu İzin'
     };
     return labels[tur] || tur;
   };
@@ -431,15 +726,29 @@ export default function IzinTalepleriPage() {
                 {isSahaPersoneli ? 'İzin taleplerinizi yönetin' : 'Tüm izin taleplerini görüntüleyin ve onaylayın'}
               </p>
             </div>
-            {isSahaPersoneli && (
-              <button
-                onClick={() => setModalOpen(true)}
-                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Yeni İzin Talebi</span>
-              </button>
-            )}
+            <div className="flex gap-3">
+              {isSahaPersoneli && (
+                <button
+                  onClick={() => setModalOpen(true)}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105"
+                >
+                  <Plus className="w-5 h-5" />
+                  <span>Yeni İzin Talebi</span>
+                </button>
+              )}
+              
+              {/* Koordinatör ve Yönetici için Personel İzni Butonu */}
+              {(user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') && (
+                <button
+                  onClick={() => window.location.href = '/dashboard/personel'}
+                  className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105"
+                  title="Personel sayfasından personel seçerek izin oluşturabilirsiniz"
+                >
+                  <Calendar className="w-5 h-5" />
+                  <span>Personelim İçin İzin Oluştur</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -509,19 +818,10 @@ export default function IzinTalepleriPage() {
                 className={`w-full px-4 py-3 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500`}
               >
                 <option value="all">Tüm Türler</option>
-                <optgroup label="Yeni Sistem">
-                  <option value="ucretli">Ücretli İzin</option>
-                  <option value="ucretsiz">Ücretsiz İzin</option>
-                  <option value="raporlu">Raporlu İzin</option>
-                </optgroup>
-                <optgroup label="Eski Sistem (Geçici)">
-                  <option value="yillik">Yıllık İzin</option>
-                  <option value="mazeret">Mazeret İzni</option>
-                  <option value="hastalik">Hastalık İzni</option>
-                  <option value="dogum">Doğum İzni</option>
-                  <option value="vefat">Vefat İzni</option>
-                  <option value="evlilik">Evlilik İzni</option>
-                </optgroup>
+                <option value="yillik">Yıllık İzin</option>
+                <option value="ucretli">Ücretli İzin</option>
+                <option value="ucretsiz">Ücretsiz İzin</option>
+                <option value="raporlu">Raporlu İzin</option>
               </select>
             </div>
           </div>
@@ -584,7 +884,14 @@ export default function IzinTalepleriPage() {
                             </div>
                             <div>
                               <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Süre</p>
-                              <p className={`${isDark ? 'text-white' : 'text-gray-900'} font-medium`}>{talep.GunSayisi} gün</p>
+                              <p className={`${isDark ? 'text-white' : 'text-gray-900'} font-medium`}>
+                                {talep.GunSayisi} gün
+                                {talep.Aciklama?.includes('tatile denk geliyor') && (
+                                  <span className="ml-2 text-xs text-orange-500">
+                                    ⚠️ Tatil(ler) Hariç
+                                  </span>
+                                )}
+                              </p>
                             </div>
                             <div>
                               <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Talep Tarihi</p>
@@ -707,91 +1014,193 @@ export default function IzinTalepleriPage() {
 
         {/* Yeni Talep Modal */}
         {modalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm overflow-hidden">
-            <div className="glass-dark rounded-2xl p-6 sm:p-8 w-full max-w-2xl max-h-[90vh] overflow-y-auto relative z-10">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">Yeni İzin Talebi</h2>
-                <button onClick={closeModal} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
-                  <X className="w-6 h-6 text-white" />
-                </button>
+          <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
+            <div 
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+              onClick={closeModal}
+              style={{ position: 'fixed', bottom: '60px' }}
+            />
+            <div 
+              className={cn(
+                'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+                isDark ? 'bg-gray-800/95' : 'bg-white/95'
+              )}
+              style={{ 
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                bottom: '60px',
+                width: '100%',
+                zIndex: 10000
+              }}
+            >
+              <div className="p-6 sm:p-8">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+                      {creatingForPersonel ? 'Personel İçin İzin Oluştur' : 'Yeni İzin Talebi'}
+                    </h2>
+                    {creatingForPersonel && (
+                      <p className="text-green-500 text-sm mt-1">
+                        👤 {creatingForPersonel.adSoyad} için izin oluşturuyorsunuz
+                      </p>
+                    )}
+                  </div>
+                  <button 
+                    onClick={closeModal} 
+                    className={cn(
+                      'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                      isDark ? 'text-gray-300' : 'text-gray-600'
+                    )}
+                    title="Kapat"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div>
+                    <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                      İzin Türü *
+                    </label>
+                    <select
+                      required
+                      value={formData.IzinTuru}
+                      onChange={(e) => setFormData({ ...formData, IzinTuru: e.target.value as IzinTuru })}
+                      className={cn(
+                        'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white' 
+                          : 'bg-white border-gray-300 text-gray-900'
+                      )}
+                    >
+                      <option value="yillik">Yıllık İzin</option>
+                      <option value="ucretli">Ücretli İzin</option>
+                      <option value="ucretsiz">Ücretsiz İzin</option>
+                      <option value="raporlu">Raporlu İzin</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                        Başlangıç Tarihi *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.BaslangicTarihi}
+                        onChange={(e) => setFormData({ ...formData, BaslangicTarihi: e.target.value })}
+                        className={cn(
+                          'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                          isDark 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
+                        )}
+                      />
+                    </div>
+
+                    <div>
+                      <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                        Bitiş Tarihi *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={formData.BitisTarihi}
+                        onChange={(e) => setFormData({ ...formData, BitisTarihi: e.target.value })}
+                        className={cn(
+                          'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                          isDark 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  {formData.BaslangicTarihi && formData.BitisTarihi && izinHesapBilgisi && (
+                    <div className="space-y-3">
+                      <div className={cn(
+                        'p-4 rounded-xl border',
+                        isDark ? 'bg-green-900/20 border-green-700' : 'bg-green-50 border-green-200'
+                      )}>
+                        <p className={cn('text-sm mb-1', isDark ? 'text-green-300' : 'text-green-700')}>
+                          ✅ İzin Günü: <span className="font-bold text-lg">
+                            {izinHesapBilgisi.calismaGunu} gün
+                          </span>
+                        </p>
+                        <p className={cn('text-xs', isDark ? 'text-green-400/70' : 'text-green-600/70')}>
+                          Sadece çalışma günleri sayılır
+                        </p>
+                      </div>
+                      
+                      {izinHesapBilgisi.tatilGunSayisi > 0 && (
+                        <div className={cn(
+                          'p-4 rounded-xl border',
+                          isDark ? 'bg-orange-900/20 border-orange-700' : 'bg-orange-50 border-orange-200'
+                        )}>
+                          <p className={cn('text-sm', isDark ? 'text-orange-300' : 'text-orange-700')}>
+                            ⚠️ <span className="font-bold">{izinHesapBilgisi.tatilGunSayisi} gün</span> tatile denk geliyor
+                          </p>
+                          <p className={cn('text-xs mt-1', isDark ? 'text-orange-400/70' : 'text-orange-600/70')}>
+                            (Puantaj tablosundaki tatiller izin sayılmaz)
+                          </p>
+                        </div>
+                      )}
+                      
+                      <div className={cn(
+                        'p-3 rounded-xl border',
+                        isDark ? 'bg-blue-900/20 border-blue-700' : 'bg-blue-50 border-blue-200'
+                      )}>
+                        <p className={cn('text-xs', isDark ? 'text-blue-300' : 'text-blue-700')}>
+                          📅 Toplam süre: {izinHesapBilgisi.toplamGun} gün 
+                          ({izinHesapBilgisi.calismaGunu} çalışma + {izinHesapBilgisi.tatilGunSayisi} tatil)
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                      Açıklama
+                    </label>
+                    <textarea
+                      value={formData.Aciklama}
+                      onChange={(e) => setFormData({ ...formData, Aciklama: e.target.value })}
+                      rows={4}
+                      className={cn(
+                        'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                        isDark 
+                          ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                          : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                      )}
+                      placeholder="İzin sebebinizi açıklayın..."
+                    />
+                  </div>
+
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className={cn(
+                        'flex-1 px-6 py-3 rounded-xl transition-colors',
+                        isDark 
+                          ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                          : 'bg-gray-200 text-gray-900 hover:bg-gray-300'
+                      )}
+                    >
+                      İptal
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:shadow-lg transition-all"
+                    >
+                      Talep Oluştur
+                    </button>
+                  </div>
+                </form>
               </div>
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-white/90 mb-2">İzin Türü *</label>
-                  <select
-                    required
-                    value={formData.IzinTuru}
-                    onChange={(e) => setFormData({ ...formData, IzinTuru: e.target.value as IzinTuru })}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-                  >
-                    <option value="ucretli">Ücretli İzin</option>
-                    <option value="ucretsiz">Ücretsiz İzin</option>
-                    <option value="raporlu">Raporlu İzin</option>
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-white/90 mb-2">Başlangıç Tarihi *</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.BaslangicTarihi}
-                      onChange={(e) => setFormData({ ...formData, BaslangicTarihi: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-white/90 mb-2">Bitiş Tarihi *</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.BitisTarihi}
-                      onChange={(e) => setFormData({ ...formData, BitisTarihi: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-                    />
-                  </div>
-                </div>
-
-                {formData.BaslangicTarihi && formData.BitisTarihi && (
-                  <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/20">
-                    <p className="text-blue-300 text-sm">
-                      Toplam İzin Süresi: <span className="font-bold">
-                        {calculateDays(formData.BaslangicTarihi, formData.BitisTarihi)} gün
-                      </span>
-                    </p>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-sm font-medium text-white/90 mb-2">Açıklama</label>
-                  <textarea
-                    value={formData.Aciklama}
-                    onChange={(e) => setFormData({ ...formData, Aciklama: e.target.value })}
-                    rows={4}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
-                    placeholder="İzin sebebinizi açıklayın..."
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="flex-1 px-6 py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors"
-                  >
-                    İptal
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-xl hover:shadow-lg transition-all"
-                  >
-                    Talep Oluştur
-                  </button>
-                </div>
-              </form>
             </div>
           </div>
         )}
@@ -859,6 +1268,22 @@ export default function IzinTalepleriPage() {
         )}
       </DashboardLayout>
     </ProtectedRoute>
+  );
+}
+
+export default function IzinTalepleriPage() {
+  return (
+    <Suspense fallback={
+      <ProtectedRoute>
+        <DashboardLayout>
+          <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
+          </div>
+        </DashboardLayout>
+      </ProtectedRoute>
+    }>
+      <IzinTalepleriContent />
+    </Suspense>
   );
 }
 
@@ -963,7 +1388,20 @@ function TalepDetayModal({ talep, onClose, getIzinTuruLabel, getDurumLabel }: an
               <InfoField label="Durum" value={getDurumLabel(talep.Durum)} />
               <InfoField label="Başlangıç" value={new Date(talep.BaslangicTarihi).toLocaleDateString('tr-TR')} />
               <InfoField label="Bitiş" value={new Date(talep.BitisTarihi).toLocaleDateString('tr-TR')} />
-              <InfoField label="Süre" value={`${talep.GunSayisi} gün`} />
+              <InfoField 
+                label="Süre" 
+                value={
+                  talep.Aciklama?.includes('tatile denk geliyor') 
+                    ? (() => {
+                        const match = talep.Aciklama.match(/(\d+) gün izinli \((\d+) gün tatile denk geliyor\)/);
+                        if (match) {
+                          return `${match[1]} gün izinli (${match[2]} gün tatile denk geliyor)`;
+                        }
+                        return `${talep.GunSayisi} gün`;
+                      })()
+                    : `${talep.GunSayisi} gün`
+                } 
+              />
               <InfoField label="Talep Tarihi" value={new Date(talep.created_at).toLocaleDateString('tr-TR')} />
             </div>
           </div>
@@ -972,7 +1410,16 @@ function TalepDetayModal({ talep, onClose, getIzinTuruLabel, getDurumLabel }: an
             <div>
               <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'} mb-2`}>Açıklama</h3>
               <div className={`p-4 rounded-xl ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                <p className={`${isDark ? 'text-gray-300' : 'text-gray-700'}`}>{talep.Aciklama}</p>
+                <p className={`${isDark ? 'text-gray-300' : 'text-gray-700'} whitespace-pre-line`}>
+                  {talep.Aciklama.split('\n\n📅 İzin Detayı:')[0]}
+                </p>
+                {talep.Aciklama.includes('📅 İzin Detayı:') && (
+                  <div className={`mt-3 p-3 rounded-lg ${isDark ? 'bg-orange-900/20 border-orange-800/30' : 'bg-orange-50 border-orange-200'} border`}>
+                    <p className={`text-sm ${isDark ? 'text-orange-300' : 'text-orange-900'}`}>
+                      📅 {talep.Aciklama.split('📅 İzin Detayı: ')[1]}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1095,41 +1542,53 @@ function HistoryModal({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
+    <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
+        style={{ position: 'fixed', bottom: '60px' }}
       />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className={cn(
-          'min-h-full p-4 sm:p-8'
-        )}>
-          <div className={cn(
-            'rounded-2xl p-6 sm:p-8 w-full max-w-3xl mx-auto shadow-2xl',
-            isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200',
-            'border'
-          )}>
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <History className={cn('w-7 h-7', isDark ? 'text-cyan-400' : 'text-cyan-600')} />
-                <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
-                  İzin Geçmişi
-                </h2>
-              </div>
-              <button 
-                onClick={onClose} 
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
+      <div 
+        className={cn(
+          'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+          isDark ? 'bg-gray-800/95' : 'bg-white/95'
+        )}
+        style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: '60px',
+          width: '100%',
+          zIndex: 10000
+        }}
+      >
+        <div className="p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <History className={cn('w-7 h-7', isDark ? 'text-cyan-400' : 'text-cyan-600')} />
+              <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+                İzin Geçmişi
+              </h2>
             </div>
+            <button 
+              onClick={onClose} 
+              className={cn(
+                'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              )}
+              title="Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
-        {/* Talep Özeti */}
-        <div className={cn(
-          'p-4 rounded-xl mb-6',
-          isDark ? 'bg-gray-700/50' : 'bg-gray-50'
-        )}>
+          <div className="max-w-4xl mx-auto">
+
+            {/* Talep Özeti */}
+            <div className={cn(
+              'p-4 rounded-xl mb-6 border',
+              isDark ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'
+            )}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
             <div>
               <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Personel</p>
@@ -1158,8 +1617,8 @@ function HistoryModal({
           </div>
         </div>
 
-        {/* Geçmiş Timeline */}
-        <div className="space-y-4 max-h-[500px] overflow-y-auto">
+            {/* Geçmiş Timeline */}
+            <div className="space-y-4 max-h-[500px] overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-10 w-10 border-2 border-cyan-500 border-t-transparent"></div>
@@ -1250,22 +1709,22 @@ function HistoryModal({
               </div>
             ))
           )}
-        </div>
+            </div>
 
-        <div className="mt-6">
-          <button
-            onClick={onClose}
-            className={cn(
-              'w-full px-6 py-3 rounded-xl transition-colors',
-              isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
-            )}
-          >
-            Kapat
-          </button>
+            <div className="mt-6">
+              <button
+                onClick={onClose}
+                className={cn(
+                  'w-full px-6 py-3 rounded-xl transition-colors',
+                  isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-900'
+                )}
+              >
+                Kapat
+              </button>
+            </div>
+          </div>
         </div>
       </div>
-      </div>
-    </div>
     </div>
   );
 
@@ -1283,6 +1742,7 @@ function OnayModal({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 }: any) {
   const [mounted, setMounted] = useState(false);
+  const { isDark } = useTheme();
 
   useEffect(() => {
     setMounted(true);
@@ -1292,74 +1752,106 @@ function OnayModal({
   if (!isOpen || !mounted) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
+    <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
+        style={{ position: 'fixed', bottom: '60px' }}
       />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className="glass-dark rounded-2xl p-6 sm:p-8 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">
-                {onayFormData.isApprove ? 'Talebi Onayla' : 'Talebi Reddet'}
-              </h2>
-              <button
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
+      <div 
+        className={cn(
+          'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+          isDark ? 'bg-gray-800/95' : 'bg-white/95'
+        )}
+        style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: '60px',
+          width: '100%',
+          zIndex: 10000
+        }}
+      >
+        <div className="p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+              {onayFormData.isApprove ? 'Talebi Onayla' : 'Talebi Reddet'}
+            </h2>
+            <button
+              onClick={onClose}
+              className={cn(
+                'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              )}
+              title="Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="space-y-4 max-w-2xl mx-auto">
+            <div className={cn(
+              'p-4 rounded-xl border',
+              isDark ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'
+            )}>
+              <p className={cn('text-sm mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>Personel:</p>
+              <p className={cn('font-medium', isDark ? 'text-white' : 'text-gray-900')}>
+                {selectedTalep.PersonelInfo?.P_AdSoyad}
+              </p>
+              <p className={cn('text-sm mt-2 mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>İzin Türü:</p>
+              <p className={cn('font-medium', isDark ? 'text-white' : 'text-gray-900')}>
+                {getIzinTuruLabel(selectedTalep.IzinTuru)}
+              </p>
+              <p className={cn('text-sm mt-2 mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>Süre:</p>
+              <p className={cn('font-medium', isDark ? 'text-white' : 'text-gray-900')}>
+                {new Date(selectedTalep.BaslangicTarihi).toLocaleDateString('tr-TR')} - 
+                {new Date(selectedTalep.BitisTarihi).toLocaleDateString('tr-TR')} ({selectedTalep.GunSayisi} gün)
+              </p>
             </div>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-white/5">
-                <p className="text-white/60 text-sm mb-1">Personel:</p>
-                <p className="text-white font-medium">{selectedTalep.PersonelInfo?.P_AdSoyad}</p>
-                <p className="text-white/60 text-sm mt-2 mb-1">İzin Türü:</p>
-                <p className="text-white font-medium">{getIzinTuruLabel(selectedTalep.IzinTuru)}</p>
-                <p className="text-white/60 text-sm mt-2 mb-1">Süre:</p>
-                <p className="text-white font-medium">
-                  {new Date(selectedTalep.BaslangicTarihi).toLocaleDateString('tr-TR')} - 
-                  {new Date(selectedTalep.BitisTarihi).toLocaleDateString('tr-TR')} ({selectedTalep.GunSayisi} gün)
-                </p>
-              </div>
+            <div>
+              <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                Not {onayFormData.isApprove ? '(Opsiyonel)' : '*'}
+              </label>
+              <textarea
+                required={!onayFormData.isApprove}
+                value={onayFormData.not}
+                onChange={(e) => setOnayFormData({ ...onayFormData, not: e.target.value })}
+                rows={4}
+                className={cn(
+                  'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                  isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                )}
+                placeholder={onayFormData.isApprove ? "Onay notu ekleyin..." : "Red sebebini açıklayın..."}
+              />
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-white/90 mb-2">
-                  Not {onayFormData.isApprove ? '(Opsiyonel)' : '*'}
-                </label>
-                <textarea
-                  required={!onayFormData.isApprove}
-                  value={onayFormData.not}
-                  onChange={(e) => setOnayFormData({ ...onayFormData, not: e.target.value })}
-                  rows={4}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
-                  placeholder={onayFormData.isApprove ? "Onay notu ekleyin..." : "Red sebebini açıklayın..."}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 px-6 py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors"
-                >
-                  İptal
-                </button>
-                <button
-                  onClick={handleOnayReddet}
-                  className={cn(
-                    "flex-1 px-6 py-3 text-white rounded-xl hover:shadow-lg transition-all",
-                    onayFormData.isApprove
-                      ? "bg-gradient-to-r from-green-500 to-emerald-500"
-                      : "bg-gradient-to-r from-red-500 to-pink-500"
-                  )}
-                >
-                  {onayFormData.isApprove ? 'Onayla' : 'Reddet'}
-                </button>
-              </div>
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className={cn(
+                  'flex-1 px-6 py-3 rounded-xl transition-colors',
+                  isDark 
+                    ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                    : 'bg-gray-200 text-gray-900 hover:bg-gray-300'
+                )}
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleOnayReddet}
+                className={cn(
+                  "flex-1 px-6 py-3 text-white rounded-xl hover:shadow-lg transition-all",
+                  onayFormData.isApprove
+                    ? "bg-gradient-to-r from-green-500 to-emerald-500"
+                    : "bg-gradient-to-r from-red-500 to-pink-500"
+                )}
+              >
+                {onayFormData.isApprove ? 'Onayla' : 'Reddet'}
+              </button>
             </div>
           </div>
         </div>
@@ -1391,38 +1883,52 @@ function EditDateModal({
   if (!isOpen || !mounted) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
+    <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
+        style={{ position: 'fixed', bottom: '60px' }}
       />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className={cn(
-            'rounded-2xl p-6 sm:p-8 w-full max-w-lg shadow-2xl',
-            isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200',
-            'border'
-          )}>
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-3">
-                <Edit3 className={cn('w-6 h-6', isDark ? 'text-purple-400' : 'text-purple-600')} />
-                <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
-                  Tarihleri Düzenle
-                </h2>
-              </div>
-              <button 
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
+      <div 
+        className={cn(
+          'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+          isDark ? 'bg-gray-800/95' : 'bg-white/95'
+        )}
+        style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: '60px',
+          width: '100%',
+          zIndex: 10000
+        }}
+      >
+        <div className="p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <Edit3 className={cn('w-6 h-6', isDark ? 'text-purple-400' : 'text-purple-600')} />
+              <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+                Tarihleri Düzenle
+              </h2>
             </div>
+            <button 
+              onClick={onClose}
+              className={cn(
+                'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              )}
+              title="Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="max-w-2xl mx-auto">
 
             {/* Mevcut Bilgiler */}
             <div className={cn(
-              'p-4 rounded-xl mb-6',
-              isDark ? 'bg-gray-700/50' : 'bg-gray-50'
+              'p-4 rounded-xl mb-6 border',
+              isDark ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'
             )}>
               <p className={cn('text-sm mb-2', isDark ? 'text-gray-400' : 'text-gray-600')}>
                 Mevcut Tarihler

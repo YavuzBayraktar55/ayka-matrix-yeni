@@ -13,7 +13,12 @@ export interface LeaveAgreementData {
 
 // ÜCRETLİ İZİN SÖZLEŞMESİ
 export const generatePaidLeaveAgreement = async (data: LeaveAgreementData): Promise<void> => {
-  const doc = new jsPDF();
+  const doc = new jsPDF({
+    unit: 'mm',
+    format: 'a4',
+    compress: true,
+    precision: 16 // Yüksek hassasiyet için
+  });
   const pageWidth = doc.internal.pageSize.getWidth();
 
   await addHeaderFooter(doc, 'UCRETLI IZIN SOZLESMESI', data.preparationDate);

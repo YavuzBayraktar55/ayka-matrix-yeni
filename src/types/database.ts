@@ -56,8 +56,8 @@ export interface PersonelInfo {
   created_at: string;
 }
 
-// Geçici: Eski ve yeni değerleri destekle
-export type IzinTuru = 'ucretli' | 'ucretsiz' | 'raporlu' | 'yillik' | 'mazeret' | 'hastalik' | 'dogum' | 'vefat' | 'evlilik';
+// İzin türleri - 4 ana tür
+export type IzinTuru = 'yillik' | 'ucretli' | 'ucretsiz' | 'raporlu';
 export type TalepDurum = 'beklemede' | 'koordinator_onay' | 'yonetim_onay' | 'reddedildi' | 'iptal';
 export type IslemTipi = 'olusturuldu' | 'koordinator_onay' | 'yonetim_onay' | 'reddedildi' | 'tarih_degistirildi' | 'iptal';
 
@@ -124,6 +124,18 @@ export interface EvrakTakip {
   HazirlayanKisi: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface EvrakKayitlari {
+  EvrakID: number;
+  PersonelTcKimlik: number;
+  SablonAdi: string;
+  SablonTuru: string | null;
+  EvrakTarihi: string;
+  Aciklama: string | null;
+  PDFYolu: string | null;
+  OlusturanEmail: string | null;
+  OlusturmaTarihi: string;
 }
 
 export interface AykaSosyal {

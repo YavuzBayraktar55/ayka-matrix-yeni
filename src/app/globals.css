@@ -208,6 +208,18 @@ button, a, input, select, textarea {
   break-after: page;
   box-shadow: none; /* Box shadow tamamen kaldırıldı */
   overflow: hidden; /* Her sayfa içeriği kendi sınırında */
+  /* PDF netliği için */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* A4 sayfadaki resimler için yüksek kalite */
+.a4-page img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+  max-width: 100%;
+  height: auto;
 }
 
 /* Sayfa hover efekti */
@@ -222,6 +234,10 @@ button, a, input, select, textarea {
   background: white;
   position: relative;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  /* Net görünüm için */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 .a4-page-editor:hover {
@@ -229,13 +245,26 @@ button, a, input, select, textarea {
   transition: box-shadow 0.3s ease;
 }
 
+/* A4 editördeki resimler için yüksek kalite */
+.a4-page-editor img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: high-quality;
+  image-rendering: crisp-edges;
+}
+
 .pdf-canvas {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: #f5f5f5; /* Gri zemin - sayfalar beyaz üzerinde */
+  background: transparent; /* Şeffaf arkaplan */
   padding: 40px 0;
   gap: 20px; /* Sayfalar arası boşluk */
+  /* PDF netliği için ayarlar */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
 /* Sayfa içeriği */
@@ -256,6 +285,10 @@ button, a, input, select, textarea {
     margin: 0;
     padding: 0;
     background: white;
+    /* Yüksek kalite yazdırma */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    color-adjust: exact;
   }
 
   .a4-page {
@@ -266,6 +299,20 @@ button, a, input, select, textarea {
     box-shadow: none;
     page-break-after: always;
     break-after: page;
+  }
+  
+  /* PDF netliği için */
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  
+  img {
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    max-width: 100%;
+    height: auto;
   }
 
   /* Son sayfada page break olmasın */

@@ -3,12 +3,10 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTheme } from '@/contexts/ThemeContext';
 import Loader from '@/components/Loader';
 
 export default function HomePage() {
   const { user, loading } = useAuth();
-  const { isDark } = useTheme();
   const router = useRouter();
 
   useEffect(() => {

@@ -134,14 +134,25 @@ export async function POST(request: NextRequest) {
 
     // İzin verileri varsa ekle
     if (izinData) {
-      variables['{izin_baslangic}'] = izinData.BaslangicTarihi 
-        ? new Date(izinData.BaslangicTarihi).toLocaleDateString('tr-TR')
+      const baslangicTarihi = izinData.BaslangicTarihi ? new Date(izinData.BaslangicTarihi) : null;
+      
+      // İzin başlangıcından 1 gün önceki tarihi hesapla
+      let hazirlamaTarihi = '';
+      if (baslangicTarihi) {
+        const oncekiGun = new Date(baslangicTarihi);
+        oncekiGun.setDate(oncekiGun.getDate() - 1);
+        hazirlamaTarihi = oncekiGun.toLocaleDateString('tr-TR');
+      }
+      
+      variables['{izin_baslangic}'] = baslangicTarihi 
+        ? baslangicTarihi.toLocaleDateString('tr-TR')
         : '';
       variables['{izin_bitis}'] = izinData.BitisTarihi 
         ? new Date(izinData.BitisTarihi).toLocaleDateString('tr-TR')
         : '';
       variables['{izin_gun}'] = izinData.GunSayisi?.toString() || '';
       variables['{izin_turu}'] = izinData.IzinTuru || '';
+      variables['{izin_hazirlama_tarihi}'] = hazirlamaTarihi;
     }
 
     // Avans verileri varsa ekle

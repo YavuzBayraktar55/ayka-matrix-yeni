@@ -283,38 +283,63 @@ export default function AvansTalepleriPage() {
             icon={XCircle}
             color="from-red-500 to-pink-500"
           />
-          <div className="glass-dark rounded-2xl p-6">
+          <div className={cn(
+            'rounded-2xl p-6 border',
+            isDark ? 'bg-gray-800/50 border-gray-700' : 'bg-white border-gray-200'
+          )}>
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
                 <DollarSign className="w-6 h-6 text-white" />
               </div>
             </div>
-            <h3 className="text-2xl font-bold text-white mb-1">
+            <h3 className={cn(
+              'text-2xl font-bold mb-1',
+              isDark ? 'text-white' : 'text-gray-900'
+            )}>
               {toplamAvans.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
             </h3>
-            <p className="text-white/60 text-sm">Toplam Avans</p>
+            <p className={isDark ? 'text-gray-400 text-sm' : 'text-gray-600 text-sm'}>Toplam Avans</p>
           </div>
         </div>
 
         {/* Filters */}
-        <div className="glass-dark rounded-2xl p-4 mb-6 space-y-4">
+        <div className={cn(
+          'rounded-2xl p-4 mb-6 space-y-4 border',
+          isDark ? 'bg-gray-800/50 border-gray-700' : 'bg-white border-gray-200'
+        )}>
           <div className="relative">
-            <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/50" />
+            <Search className={cn(
+              'absolute left-4 top-1/2 transform -translate-y-1/2 w-5 h-5',
+              isDark ? 'text-gray-400' : 'text-gray-500'
+            )} />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Personel adı ile ara..."
-              className="w-full pl-12 pr-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
+              className={cn(
+                'w-full pl-12 pr-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                isDark 
+                  ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                  : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-500'
+              )}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-white/90 mb-2">Durum Filtresi</label>
+            <label className={cn(
+              'block text-sm font-medium mb-2',
+              isDark ? 'text-gray-300' : 'text-gray-700'
+            )}>Durum Filtresi</label>
             <select
               value={filterDurum}
               onChange={(e) => setFilterDurum(e.target.value)}
-              className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30"
+              className={cn(
+                'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                isDark 
+                  ? 'bg-gray-700 border-gray-600 text-white' 
+                  : 'bg-gray-50 border-gray-300 text-gray-900'
+              )}
             >
               <option value="all">Tüm Durumlar</option>
               <option value="beklemede">Beklemede</option>
@@ -329,18 +354,29 @@ export default function AvansTalepleriPage() {
         {/* Talepler Listesi */}
         <div className="space-y-4">
           {loading ? (
-            <div className="glass-dark rounded-2xl p-8 text-center text-white/70">
+            <div className={cn(
+              'rounded-2xl p-8 text-center border',
+              isDark ? 'bg-gray-800/50 border-gray-700 text-gray-400' : 'bg-white border-gray-200 text-gray-600'
+            )}>
               Yükleniyor...
             </div>
           ) : filteredTalepler.length === 0 ? (
-            <div className="glass-dark rounded-2xl p-8 text-center text-white/70">
+            <div className={cn(
+              'rounded-2xl p-8 text-center border',
+              isDark ? 'bg-gray-800/50 border-gray-700 text-gray-400' : 'bg-white border-gray-200 text-gray-600'
+            )}>
               Talep bulunamadı
             </div>
           ) : (
             filteredTalepler.map((talep) => {
               const Icon = getDurumIcon(talep.Durum);
               return (
-                <div key={talep.TalepID} className="glass-dark rounded-2xl p-6 hover:bg-white/10 transition-colors">
+                <div key={talep.TalepID} className={cn(
+                  'rounded-2xl p-6 transition-all border',
+                  isDark 
+                    ? 'bg-gray-800/50 border-gray-700 hover:bg-gray-800' 
+                    : 'bg-white border-gray-200 hover:shadow-md'
+                )}>
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                     {/* Sol Taraf - Bilgiler */}
                     <div className="flex-1 space-y-3">
@@ -350,16 +386,19 @@ export default function AvansTalepleriPage() {
                         </div>
                         <div className="flex-1">
                           <div className="flex items-center gap-3 flex-wrap mb-2">
-                            <h3 className="text-lg font-semibold text-white">
+                            <h3 className={cn(
+                              'text-lg font-semibold',
+                              isDark ? 'text-white' : 'text-gray-900'
+                            )}>
                               {talep.PersonelInfo?.P_AdSoyad || 'Bilinmiyor'}
                             </h3>
                             <span className={cn(
-                              "px-3 py-1 rounded-lg text-white text-sm font-medium",
-                              talep.Durum === 'yonetim_onay' && "bg-green-500/20",
-                              talep.Durum === 'beklemede' && "bg-yellow-500/20",
-                              talep.Durum === 'koordinator_onay' && "bg-blue-500/20",
-                              talep.Durum === 'reddedildi' && "bg-red-500/20",
-                              talep.Durum === 'iptal' && "bg-gray-500/20"
+                              "px-3 py-1 rounded-lg text-sm font-medium",
+                              talep.Durum === 'yonetim_onay' && "bg-green-500/20 text-green-300",
+                              talep.Durum === 'beklemede' && "bg-yellow-500/20 text-yellow-300",
+                              talep.Durum === 'koordinator_onay' && "bg-blue-500/20 text-blue-300",
+                              talep.Durum === 'reddedildi' && "bg-red-500/20 text-red-300",
+                              talep.Durum === 'iptal' && "bg-gray-500/20 text-gray-400"
                             )}>
                               {getDurumLabel(talep.Durum)}
                             </span>
@@ -367,25 +406,37 @@ export default function AvansTalepleriPage() {
                           
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
                             <div>
-                              <p className="text-white/60">Avans Miktarı</p>
-                              <p className="text-white font-bold text-lg">
+                              <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Avans Miktarı</p>
+                              <p className={cn(
+                                'font-bold text-lg',
+                                isDark ? 'text-white' : 'text-gray-900'
+                              )}>
                                 {talep.AvansMiktari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
                               </p>
                             </div>
                             <div>
-                              <p className="text-white/60">Avans Gün Sayısı</p>
-                              <p className="text-white font-medium">{talep.AvansGunSayisi} gün</p>
+                              <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Avans Gün Sayısı</p>
+                              <p className={cn(
+                                'font-medium',
+                                isDark ? 'text-white' : 'text-gray-900'
+                              )}>{talep.AvansGunSayisi} gün</p>
                             </div>
                             <div>
-                              <p className="text-white/60">Talep Tarihi</p>
-                              <p className="text-white font-medium">
+                              <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Talep Tarihi</p>
+                              <p className={cn(
+                                'font-medium',
+                                isDark ? 'text-white' : 'text-gray-900'
+                              )}>
                                 {new Date(talep.created_at).toLocaleDateString('tr-TR')}
                               </p>
                             </div>
                             {talep.OdemeTarihi && (
                               <div>
-                                <p className="text-white/60">Ödeme Tarihi</p>
-                                <p className="text-white font-medium">
+                                <p className={isDark ? 'text-gray-400' : 'text-gray-600'}>Ödeme Tarihi</p>
+                                <p className={cn(
+                                  'font-medium',
+                                  isDark ? 'text-white' : 'text-gray-900'
+                                )}>
                                   {new Date(talep.OdemeTarihi).toLocaleDateString('tr-TR')}
                                 </p>
                               </div>
@@ -393,24 +444,55 @@ export default function AvansTalepleriPage() {
                           </div>
 
                           {talep.Aciklama && (
-                            <div className="mt-3 p-3 rounded-lg bg-white/5">
-                              <p className="text-white/60 text-sm mb-1">Açıklama:</p>
-                              <p className="text-white text-sm">{talep.Aciklama}</p>
+                            <div className={cn(
+                              'mt-3 p-3 rounded-lg',
+                              isDark ? 'bg-gray-700/50' : 'bg-gray-100'
+                            )}>
+                              <p className={cn(
+                                'text-sm mb-1',
+                                isDark ? 'text-gray-400' : 'text-gray-600'
+                              )}>Açıklama:</p>
+                              <p className={cn(
+                                'text-sm',
+                                isDark ? 'text-white' : 'text-gray-900'
+                              )}>{talep.Aciklama}</p>
                             </div>
                           )}
 
                           {(talep.KoordinatorNotu || talep.YonetimNotu) && (
                             <div className="mt-3 space-y-2">
                               {talep.KoordinatorNotu && (
-                                <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                                  <p className="text-blue-300 text-sm mb-1">Koordinatör Notu:</p>
-                                  <p className="text-white text-sm">{talep.KoordinatorNotu}</p>
+                                <div className={cn(
+                                  'p-3 rounded-lg border',
+                                  isDark 
+                                    ? 'bg-blue-500/10 border-blue-500/20' 
+                                    : 'bg-blue-50 border-blue-200'
+                                )}>
+                                  <p className={cn(
+                                    'text-sm mb-1',
+                                    isDark ? 'text-blue-300' : 'text-blue-700'
+                                  )}>Koordinatör Notu:</p>
+                                  <p className={cn(
+                                    'text-sm',
+                                    isDark ? 'text-white' : 'text-gray-900'
+                                  )}>{talep.KoordinatorNotu}</p>
                                 </div>
                               )}
                               {talep.YonetimNotu && (
-                                <div className="p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-                                  <p className="text-purple-300 text-sm mb-1">Yönetim Notu:</p>
-                                  <p className="text-white text-sm">{talep.YonetimNotu}</p>
+                                <div className={cn(
+                                  'p-3 rounded-lg border',
+                                  isDark 
+                                    ? 'bg-purple-500/10 border-purple-500/20' 
+                                    : 'bg-purple-50 border-purple-200'
+                                )}>
+                                  <p className={cn(
+                                    'text-sm mb-1',
+                                    isDark ? 'text-purple-300' : 'text-purple-700'
+                                  )}>Yönetim Notu:</p>
+                                  <p className={cn(
+                                    'text-sm',
+                                    isDark ? 'text-white' : 'text-gray-900'
+                                  )}>{talep.YonetimNotu}</p>
                                 </div>
                               )}
                             </div>
@@ -478,6 +560,7 @@ export default function AvansTalepleriPage() {
             formData={formData}
             setFormData={setFormData}
             handleSubmit={handleSubmit}
+            isDark={isDark}
           />
         )}
 
@@ -495,6 +578,7 @@ export default function AvansTalepleriPage() {
             setOnayFormData={setOnayFormData}
             handleOnayReddet={handleOnayReddet}
             user={user}
+            isDark={isDark}
           />
         )}
 
@@ -507,6 +591,7 @@ export default function AvansTalepleriPage() {
               setSelectedTalep(null);
             }}
             getDurumLabel={getDurumLabel}
+            isDark={isDark}
           />
         )}
         </>
@@ -518,21 +603,32 @@ export default function AvansTalepleriPage() {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function StatCard({ title, value, icon: Icon, color }: any) {
+  const { isDark } = useTheme();
+  
   return (
-    <div className="glass-dark rounded-2xl p-6">
+    <div className={cn(
+      'rounded-2xl p-6 border',
+      isDark ? 'bg-gray-800/50 border-gray-700' : 'bg-white border-gray-200'
+    )}>
       <div className="flex items-center justify-between mb-4">
         <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center`}>
           <Icon className="w-6 h-6 text-white" />
         </div>
       </div>
-      <h3 className="text-2xl font-bold text-white mb-1">{value}</h3>
-      <p className="text-white/60 text-sm">{title}</p>
+      <h3 className={cn(
+        'text-2xl font-bold mb-1',
+        isDark ? 'text-white' : 'text-gray-900'
+      )}>{value}</h3>
+      <p className={cn(
+        'text-sm',
+        isDark ? 'text-gray-400' : 'text-gray-600'
+      )}>{title}</p>
     </div>
   );
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function TalepDetayModal({ talep, onClose, getDurumLabel }: any) {
+function TalepDetayModal({ talep, onClose, getDurumLabel, isDark }: any) {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -551,12 +647,21 @@ function TalepDetayModal({ talep, onClose, getDurumLabel }: any) {
       />
       <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
         <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className="glass-dark rounded-2xl p-6 sm:p-8 w-full max-w-2xl">
+          <div className={cn(
+            'rounded-2xl p-6 sm:p-8 w-full max-w-2xl border',
+            isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+          )}>
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Talep Detayları</h2>
+              <h2 className={cn(
+                'text-2xl font-bold',
+                isDark ? 'text-white' : 'text-gray-900'
+              )}>Talep Detayları</h2>
               <button 
                 onClick={onClose} 
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
+                className={cn(
+                  'w-12 h-10 flex items-center justify-center rounded transition-colors',
+                  isDark ? 'hover:bg-red-600 text-white' : 'hover:bg-red-600 text-gray-600 hover:text-white'
+                )}
               >
                 <X className="w-6 h-6" />
               </button>
@@ -564,15 +669,21 @@ function TalepDetayModal({ talep, onClose, getDurumLabel }: any) {
 
         <div className="space-y-6">
           <div>
-            <h3 className="text-lg font-semibold text-white mb-4">Personel Bilgileri</h3>
+            <h3 className={cn(
+              'text-lg font-semibold mb-4',
+              isDark ? 'text-white' : 'text-gray-900'
+            )}>Personel Bilgileri</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <InfoField label="Ad Soyad" value={talep.PersonelInfo?.P_AdSoyad} />
-              <InfoField label="Bölge" value={talep.BolgeInfo?.BolgeAdi} />
+              <InfoField label="Ad Soyad" value={talep.PersonelInfo?.P_AdSoyad} isDark={isDark} />
+              <InfoField label="Bölge" value={talep.BolgeInfo?.BolgeAdi} isDark={isDark} />
             </div>
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold text-white mb-4">Avans Bilgileri</h3>
+            <h3 className={cn(
+              'text-lg font-semibold mb-4',
+              isDark ? 'text-white' : 'text-gray-900'
+            )}>Avans Bilgileri</h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <InfoField 
                 label="Avans Miktarı" 
@@ -645,6 +756,7 @@ function TalepDetayModal({ talep, onClose, getDurumLabel }: any) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function AvansFormModal({ isOpen, onClose, formData, setFormData, handleSubmit }: any) {
   const [mounted, setMounted] = useState(false);
+  const { isDark } = useTheme();
 
   useEffect(() => {
     setMounted(true);
@@ -654,42 +766,70 @@ function AvansFormModal({ isOpen, onClose, formData, setFormData, handleSubmit }
   if (!isOpen || !mounted) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
+    <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
+        style={{ position: 'fixed', bottom: '60px' }}
       />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className="glass-dark rounded-2xl p-6 sm:p-8 w-full max-w-2xl">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">Yeni Avans Talebi</h2>
-              <button 
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
+      <div 
+        className={cn(
+          'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+          isDark ? 'bg-gray-800/95' : 'bg-white/95'
+        )}
+        style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: '60px',
+          width: '100%',
+          zIndex: 10000
+        }}
+      >
+        <div className="p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+              Yeni Avans Talebi
+            </h2>
+            <button 
+              onClick={onClose}
+              className={cn(
+                'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              )}
+              title="Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
+          <div className="max-w-2xl mx-auto">
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-white/90 mb-2">Avans Gün Sayısı *</label>
+                  <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                    Avans Gün Sayısı *
+                  </label>
                   <input
                     type="number"
                     required
                     min="1"
                     value={formData.AvansGunSayisi}
                     onChange={(e) => setFormData({ ...formData, AvansGunSayisi: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    className={cn(
+                      'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      isDark 
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    )}
                     placeholder="15"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-white/90 mb-2">Avans Miktarı (₺) *</label>
+                  <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                    Avans Miktarı (₺) *
+                  </label>
                   <input
                     type="number"
                     required
@@ -697,20 +837,32 @@ function AvansFormModal({ isOpen, onClose, formData, setFormData, handleSubmit }
                     step="0.01"
                     value={formData.AvansMiktari}
                     onChange={(e) => setFormData({ ...formData, AvansMiktari: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
+                    className={cn(
+                      'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                      isDark 
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    )}
                     placeholder="5000.00"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-white/90 mb-2">Açıklama *</label>
+                <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                  Açıklama *
+                </label>
                 <textarea
                   required
                   value={formData.Aciklama}
                   onChange={(e) => setFormData({ ...formData, Aciklama: e.target.value })}
                   rows={4}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
+                  className={cn(
+                    'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                      : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                  )}
                   placeholder="Avans sebebinizi açıklayın..."
                 />
               </div>
@@ -719,7 +871,12 @@ function AvansFormModal({ isOpen, onClose, formData, setFormData, handleSubmit }
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 px-6 py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors"
+                  className={cn(
+                    'flex-1 px-6 py-3 rounded-xl transition-colors',
+                    isDark 
+                      ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                      : 'bg-gray-200 text-gray-900 hover:bg-gray-300'
+                  )}
                 >
                   İptal
                 </button>
@@ -743,6 +900,7 @@ function AvansFormModal({ isOpen, onClose, formData, setFormData, handleSubmit }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function AvansOnayModal({ isOpen, onClose, selectedTalep, onayFormData, setOnayFormData, handleOnayReddet, user }: any) {
   const [mounted, setMounted] = useState(false);
+  const { isDark } = useTheme();
 
   useEffect(() => {
     setMounted(true);
@@ -752,87 +910,124 @@ function AvansOnayModal({ isOpen, onClose, selectedTalep, onayFormData, setOnayF
   if (!isOpen || !mounted) return null;
 
   const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
+    <div className="fixed inset-0 z-[9999] overflow-hidden" style={{ position: 'fixed', bottom: '60px' }}>
       <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
+        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
+        style={{ position: 'fixed', bottom: '60px' }}
       />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className="glass-dark rounded-2xl p-6 sm:p-8 w-full max-w-lg">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-2xl font-bold text-white">
-                {onayFormData.isApprove ? 'Talebi Onayla' : 'Talebi Reddet'}
-              </h2>
-              <button
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
+      <div 
+        className={cn(
+          'rounded-none shadow-2xl w-full overflow-y-auto backdrop-blur-xl animate-scale-in',
+          isDark ? 'bg-gray-800/95' : 'bg-white/95'
+        )}
+        style={{ 
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: '60px',
+          width: '100%',
+          zIndex: 10000
+        }}
+      >
+        <div className="p-6 sm:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className={cn('text-2xl font-bold', isDark ? 'text-white' : 'text-gray-900')}>
+              {onayFormData.isApprove ? 'Talebi Onayla' : 'Talebi Reddet'}
+            </h2>
+            <button
+              onClick={onClose}
+              className={cn(
+                'w-12 h-10 flex items-center justify-center transition-all hover:bg-red-600 hover:text-white',
+                isDark ? 'text-gray-300' : 'text-gray-600'
+              )}
+              title="Kapat"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="max-w-2xl mx-auto space-y-4">
+            <div className={cn(
+              'p-4 rounded-xl border',
+              isDark ? 'bg-gray-700/50 border-gray-600' : 'bg-gray-50 border-gray-200'
+            )}>
+              <p className={cn('text-sm mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>Personel:</p>
+              <p className={cn('font-medium', isDark ? 'text-white' : 'text-gray-900')}>
+                {selectedTalep.PersonelInfo?.P_AdSoyad}
+              </p>
+              <p className={cn('text-sm mt-2 mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>Avans Miktarı:</p>
+              <p className={cn('font-bold text-lg', isDark ? 'text-white' : 'text-gray-900')}>
+                {selectedTalep.AvansMiktari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+              </p>
+              <p className={cn('text-sm mt-2 mb-1', isDark ? 'text-gray-400' : 'text-gray-600')}>Avans Gün Sayısı:</p>
+              <p className={cn('font-medium', isDark ? 'text-white' : 'text-gray-900')}>
+                {selectedTalep.AvansGunSayisi} gün
+              </p>
             </div>
 
-            <div className="space-y-4">
-              <div className="p-4 rounded-xl bg-white/5">
-                <p className="text-white/60 text-sm mb-1">Personel:</p>
-                <p className="text-white font-medium">{selectedTalep.PersonelInfo?.P_AdSoyad}</p>
-                <p className="text-white/60 text-sm mt-2 mb-1">Avans Miktarı:</p>
-                <p className="text-white font-bold text-lg">
-                  {selectedTalep.AvansMiktari.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
-                </p>
-                <p className="text-white/60 text-sm mt-2 mb-1">Avans Gün Sayısı:</p>
-                <p className="text-white font-medium">{selectedTalep.AvansGunSayisi} gün</p>
-              </div>
-
-              {onayFormData.isApprove && (user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') && (
-                <div>
-                  <label className="block text-sm font-medium text-white/90 mb-2">
-                    Ödeme Tarihi (Opsiyonel)
-                  </label>
-                  <input
-                    type="date"
-                    value={onayFormData.odemeTarihi}
-                    onChange={(e) => setOnayFormData({ ...onayFormData, odemeTarihi: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-white/30"
-                  />
-                </div>
-              )}
-
+            {onayFormData.isApprove && (user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') && (
               <div>
-                <label className="block text-sm font-medium text-white/90 mb-2">
-                  Not {onayFormData.isApprove ? '(Opsiyonel)' : '*'}
+                <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                  Ödeme Tarihi (Opsiyonel)
                 </label>
-                <textarea
-                  required={!onayFormData.isApprove}
-                  value={onayFormData.not}
-                  onChange={(e) => setOnayFormData({ ...onayFormData, not: e.target.value })}
-                  rows={4}
-                  className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-white/30"
-                  placeholder={onayFormData.isApprove ? "Onay notu ekleyin..." : "Red sebebini açıklayın..."}
+                <input
+                  type="date"
+                  value={onayFormData.odemeTarihi}
+                  onChange={(e) => setOnayFormData({ ...onayFormData, odemeTarihi: e.target.value })}
+                  className={cn(
+                    'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                    isDark 
+                      ? 'bg-gray-700 border-gray-600 text-white' 
+                      : 'bg-white border-gray-300 text-gray-900'
+                  )}
                 />
               </div>
+            )}
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="flex-1 px-6 py-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-colors"
-                >
-                  İptal
-                </button>
-                <button
-                  onClick={handleOnayReddet}
-                  className={cn(
-                    "flex-1 px-6 py-3 text-white rounded-xl hover:shadow-lg transition-all",
-                    onayFormData.isApprove
-                      ? "bg-gradient-to-r from-green-500 to-emerald-500"
-                      : "bg-gradient-to-r from-red-500 to-pink-500"
-                  )}
-                >
-                  {onayFormData.isApprove ? 'Onayla' : 'Reddet'}
-                </button>
-              </div>
+            <div>
+              <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                Not {onayFormData.isApprove ? '(Opsiyonel)' : '*'}
+              </label>
+              <textarea
+                required={!onayFormData.isApprove}
+                value={onayFormData.not}
+                onChange={(e) => setOnayFormData({ ...onayFormData, not: e.target.value })}
+                rows={4}
+                className={cn(
+                  'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                  isDark 
+                    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                )}
+                placeholder={onayFormData.isApprove ? "Onay notu ekleyin..." : "Red sebebini açıklayın..."}
+              />
+            </div>
+
+            <div className="flex gap-3 pt-4">
+              <button
+                type="button"
+                onClick={onClose}
+                className={cn(
+                  'flex-1 px-6 py-3 rounded-xl transition-colors',
+                  isDark 
+                    ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                    : 'bg-gray-200 text-gray-900 hover:bg-gray-300'
+                )}
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleOnayReddet}
+                className={cn(
+                  "flex-1 px-6 py-3 text-white rounded-xl hover:shadow-lg transition-all",
+                  onayFormData.isApprove
+                    ? "bg-gradient-to-r from-green-500 to-emerald-500"
+                    : "bg-gradient-to-r from-red-500 to-pink-500"
+                )}
+              >
+                {onayFormData.isApprove ? 'Onayla' : 'Reddet'}
+              </button>
             </div>
           </div>
         </div>
@@ -844,11 +1039,17 @@ function AvansOnayModal({ isOpen, onClose, selectedTalep, onayFormData, setOnayF
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function InfoField({ label, value }: { label: string; value: any }) {
+function InfoField({ label, value, isDark }: { label: string; value: any; isDark?: boolean }) {
   return (
     <div>
-      <p className="text-white/60 text-sm mb-1">{label}</p>
-      <p className="text-white font-medium">{value || '-'}</p>
+      <p className={cn(
+        'text-sm mb-1',
+        isDark ? 'text-gray-400' : 'text-gray-600'
+      )}>{label}</p>
+      <p className={cn(
+        'font-medium',
+        isDark ? 'text-white' : 'text-gray-900'
+      )}>{value || '-'}</p>
     </div>
   );
 }

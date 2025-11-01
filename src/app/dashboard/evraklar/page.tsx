@@ -90,7 +90,11 @@ interface PreviewData {
   html: string;
   personelInfo: Personel;
   sablonAdi: string;
-  personel: Personel;
+  personel: Personel | {
+    adi?: string;
+    tcNo?: string;
+    bolge?: string;
+  };
   contentHTML: string;
   headerContent?: string;
   footerContent?: string;
@@ -280,12 +284,11 @@ export default function EvraklarPage() {
     }
   };
 
-  // PDF olarak indir - Ayrı sayfaları yakala
-  const downloadPDF = async () => {
-    if (!canvasRef.current || !previewData) return;
+  // PDF oluştur (hem indirme hem kaydetme için kullanılacak)
+  const generatePDF = async (): Promise<jsPDF | null> => {
+    if (!canvasRef.current || !previewData) return null;
 
     try {
-      setLoading(true);
       const canvas = canvasRef.current;
       
       // Tüm .a4-page elementlerini bul
@@ -294,25 +297,24 @@ export default function EvraklarPage() {
       
       if (totalPages === 0) {
         alert('Sayfa bulunamadı!');
-        return;
+        return null;
       }
 
       console.log(`📄 ${totalPages} sayfa PDF'e dönüştürülüyor...`);
       
-      // PDF oluştur - mm birimi (standart A4)
+      // PDF oluştur - yüksek kalite ayarları
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4',
-        compress: true
+        compress: true,
+        precision: 16, // Yüksek hassasiyet
+        hotfixes: ['px_scaling'] // Piksel ölçekleme düzeltmesi
       });
       
       // A4 boyutları mm cinsinden
       const pdfWidth = 210;
       const pdfHeight = 297;
-      
-      // Orijinal devicePixelRatio'yu kaydet
-      const originalDPR = window.devicePixelRatio;
       
       // Her sayfayı ayrı ayrı yakala
       for (let i = 0; i < totalPages; i++) {
@@ -327,10 +329,12 @@ export default function EvraklarPage() {
         wrapper.style.position = 'fixed';
         wrapper.style.left = '-9999px';
         wrapper.style.top = '0';
-        wrapper.style.backgroundColor = '#FFFFFF';
+        wrapper.style.backgroundColor = '#FFFFFF !important';
         wrapper.style.overflow = 'hidden';
         wrapper.style.transform = 'scale(1)'; // Zoom etkisini sıfırla
         wrapper.style.transformOrigin = 'top left';
+        wrapper.style.margin = '0';
+        wrapper.style.padding = '0';
         
         // Sayfayı klonla ve wrapper'a ekle
         const clonedPage = pageElement.cloneNode(true) as HTMLElement;
@@ -343,39 +347,42 @@ export default function EvraklarPage() {
           const htmlEl = el as HTMLElement;
           // Box shadow'ları kaldır
           htmlEl.style.boxShadow = 'none';
-          // Görseller hariç tüm arka planları beyaz yap
+          // Görseller hariç TÜM arka planları beyaz yap (transparent dahil)
           if (htmlEl.tagName !== 'IMG') {
-            const bgColor = window.getComputedStyle(htmlEl).backgroundColor;
-            // Eğer transparent değilse beyaz yap
-            if (bgColor && bgColor !== 'rgba(0, 0, 0, 0)' && bgColor !== 'transparent') {
-              htmlEl.style.backgroundColor = '#FFFFFF';
-            }
+            htmlEl.style.backgroundColor = '#FFFFFF';
           }
         });
         
         wrapper.appendChild(clonedPage);
         document.body.appendChild(wrapper);
         
-        // DevicePixelRatio'yu geçici olarak sabitle
-        Object.defineProperty(window, 'devicePixelRatio', {
-          get: function() { return 1; },
-          configurable: true
-        });
-        
-        // Canvas'a dönüştür - sabit çözünürlük
+        // Canvas'a dönüştür - yüksek çözünürlük
         const pageCanvas = await html2canvas(wrapper, {
           useCORS: true,
           allowTaint: true,
           logging: false,
           width: 794,
-          height: 1123
-        });
-        
-        // DevicePixelRatio'yu geri yükle
-        Object.defineProperty(window, 'devicePixelRatio', {
-          get: function() { return originalDPR; },
-          configurable: true
-        });
+          height: 1123,
+          windowWidth: 794,
+          windowHeight: 1123,
+          backgroundColor: '#FFFFFF', // Tam beyaz
+          imageTimeout: 0,
+          removeContainer: false,
+          onclone: (clonedDoc: Document) => {
+            // Klonlanan dokümanda da tüm arka planları beyaz yap
+            const body = clonedDoc.body;
+            if (body) {
+              body.style.backgroundColor = '#FFFFFF';
+              const allEls = body.querySelectorAll('*');
+              allEls.forEach((el) => {
+                const htmlEl = el as HTMLElement;
+                if (htmlEl.tagName !== 'IMG') {
+                  htmlEl.style.backgroundColor = '#FFFFFF';
+                }
+              });
+            }
+          }
+        } as Record<string, unknown>);
         
         // Wrapper'ı temizle
         document.body.removeChild(wrapper);
@@ -385,38 +392,146 @@ export default function EvraklarPage() {
           pdf.addPage();
         }
         
-        // Beyaz canvas oluştur - orijinal boyutta (794x1123)
+        // Yüksek çözünürlüklü canvas oluştur (scale 2 ile çalışmak için)
+        const scale = 2;
         const whiteCanvas = document.createElement('canvas');
-        whiteCanvas.width = 794;
-        whiteCanvas.height = 1123;
-        const ctx = whiteCanvas.getContext('2d');
+        whiteCanvas.width = 794 * scale;
+        whiteCanvas.height = 1123 * scale;
+        const ctx = whiteCanvas.getContext('2d', { alpha: false });
         
         if (ctx) {
-          // 1. TAM beyaz arka plan
+          // 1. TAM beyaz arka plan (#FFFFFF)
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, 794, 1123);
+          ctx.fillRect(0, 0, 794 * scale, 1123 * scale);
           
-          // 2. İçeriği orijinal boyutta çiz (ölçekleme YOK)
-          ctx.drawImage(pageCanvas, 0, 0, 794, 1123);
+          // 2. Kalite ayarları
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
           
-          // 3. JPEG'e çevir
-          const imgData = whiteCanvas.toDataURL('image/jpeg', 1.0);
+          // 3. İçeriği yüksek çözünürlükte çiz
+          ctx.drawImage(pageCanvas, 0, 0, 794 * scale, 1123 * scale);
           
-          // 4. PDF'e ekle
-          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+          // 4. PNG'ye çevir (maksimum kalite)
+          const imgData = whiteCanvas.toDataURL('image/png', 1.0);
+          
+          // 5. PDF'e ekle - SLOW kompresyon ile
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'SLOW');
           
           console.log(`✅ Sayfa ${i + 1} eklendi (794x1123px → ${pdfWidth}x${pdfHeight}mm)`);
         }
       }
       
-      const fileName = `${previewData.sablonAdi}_${previewData.personel.PersonelInfo?.P_AdSoyad || 'personel'}_${new Date().getTime()}.pdf`;
+      return pdf;
+    } catch (error) {
+      console.error('❌ PDF oluşturma hatası:', error);
+      return null;
+    }
+  };
+
+  // PDF olarak indir
+  const downloadPDF = async () => {
+    if (!previewData) return;
+
+    try {
+      setLoading(true);
+      const pdf = await generatePDF();
+      
+      if (!pdf) {
+        alert('PDF oluşturulurken hata oluştu!');
+        return;
+      }
+
+      const personelData = previewData.personel as Record<string, unknown>;
+      const personelAdi = (personelData.adi as string) || ((personelData.PersonelInfo as Record<string, unknown>)?.P_AdSoyad as string) || 'personel';
+      const fileName = `${previewData.sablonAdi}_${personelAdi}_${new Date().getTime()}.pdf`;
       pdf.save(fileName);
       
       console.log('✅ PDF İndirildi:', fileName);
-      alert(`✅ PDF başarıyla indirildi! (${totalPages} sayfa)`);
+      alert(`✅ PDF başarıyla indirildi! (${pageCount} sayfa)`);
     } catch (error) {
-      console.error('❌ PDF oluşturma hatası:', error);
-      alert('PDF oluşturulurken hata oluştu!');
+      console.error('❌ PDF indirme hatası:', error);
+      alert('PDF indirilirken hata oluştu!');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Veritabanına kaydet
+  const saveToDatabase = async () => {
+    if (!previewData) return;
+
+    try {
+      setLoading(true);
+      
+      // 1. PDF oluştur
+      console.log('🔧 PDF oluşturuluyor...');
+      const pdf = await generatePDF();
+      
+      if (!pdf) {
+        alert('PDF oluşturulurken hata oluştu!');
+        return;
+      }
+
+      // 2. PDF'i base64'e çevir
+      const pdfBase64 = pdf.output('datauristring');
+      console.log('✅ PDF oluşturuldu, boyut:', pdfBase64.length);
+
+      // 3. API'ye gönder
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        alert('Oturum bulunamadı!');
+        return;
+      }
+
+      // Personel TC kimlik numarasını al (farklı yapılarda olabilir)
+      const personelData = previewData.personel as Record<string, unknown>;
+      const tcKimlik = (personelData.tcNo as string) || (personelData.PersonelTcKimlik as string);
+      const personelAdi = (personelData.adi as string) || ((personelData.PersonelInfo as Record<string, unknown>)?.P_AdSoyad as string) || 'Personel';
+
+      const requestData = {
+        personelTcKimlik: tcKimlik,
+        sablonAdi: previewData.sablonAdi,
+        sablonTuru: selectedSablon?.SablonTuru || 'genel',
+        pdfBase64: pdfBase64,
+        evrakTarihi: new Date().toISOString(),
+        aciklama: `${personelAdi} için oluşturulan evrak`
+      };
+
+      console.log('📤 API\'ye gönderilen veri:', {
+        personelTcKimlik: requestData.personelTcKimlik,
+        sablonAdi: requestData.sablonAdi,
+        sablonTuru: requestData.sablonTuru,
+        evrakTarihi: requestData.evrakTarihi,
+        aciklama: requestData.aciklama,
+        pdfBase64Length: requestData.pdfBase64?.length || 0
+      });
+
+      const response = await fetch('/api/evrak-kaydet', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify(requestData)
+      });
+
+      const result = await response.json();
+      console.log('📨 API Response:', result);
+
+      if (response.ok && result.success) {
+        alert(`✅ Evrak başarıyla veritabanına kaydedildi!\nEvrak ID: ${result.evrakId}`);
+        console.log('✅ Evrak kaydedildi:', result);
+      } else {
+        const errorMsg = result.error || 'Bilinmeyen hata';
+        const details = result.missing ? `\n\nEksik alanlar:\n${JSON.stringify(result.missing, null, 2)}` : '';
+        alert(`❌ Evrak kaydedilemedi!\n${errorMsg}${details}`);
+        console.error('❌ Evrak kaydetme hatası:', result);
+      }
+    } catch (error) {
+      console.error('❌ Veritabanına kaydetme hatası:', error);
+      alert('Evrak kaydedilirken hata oluştu!');
     } finally {
       setLoading(false);
     }
@@ -1243,11 +1358,32 @@ export default function EvraklarPage() {
                         'text-sm',
                         isDark ? 'text-gray-400' : 'text-gray-600'
                       )}>
-                        {previewData.personel.PersonelInfo?.P_AdSoyad || 'Personel'} - {previewData.sablonAdi}
+                        {((previewData.personel as Record<string, unknown>).adi as string) || (((previewData.personel as Record<string, unknown>).PersonelInfo as Record<string, unknown>)?.P_AdSoyad as string) || 'Personel'} - {previewData.sablonAdi}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={saveToDatabase}
+                      disabled={loading}
+                      className={cn(
+                        'flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:shadow-lg transition-all font-medium',
+                        loading && 'opacity-50 cursor-not-allowed'
+                      )}
+                      title="Evrakı veritabanına kaydet"
+                    >
+                      {loading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                          Kaydediliyor...
+                        </>
+                      ) : (
+                        <>
+                          <FileText className="w-5 h-5" />
+                          Veritabanına Kaydet
+                        </>
+                      )}
+                    </button>
                     <button
                       onClick={downloadPDF}
                       disabled={loading}
@@ -1283,7 +1419,7 @@ export default function EvraklarPage() {
                 </div>
 
                 {/* Preview Content */}
-                <div className="p-10" style={{ backgroundColor: '#f5f5f5' }}>
+                <div className="p-10" style={{ backgroundColor: '#FFFFFF' }}>
                   <div
                     ref={canvasRef}
                     className="pdf-canvas"
@@ -1315,10 +1451,12 @@ export default function EvraklarPage() {
                           className="a4-page"
                           style={{
                             marginBottom: pageIndex < numPages - 1 ? '20px' : '0',
-                            padding: '60px 80px 90px 80px' // Tüm sayfalarda aynı padding
+                            padding: '60px 80px 90px 80px', // Tüm sayfalarda aynı padding
+                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)', // Hafif gölge
+                            backgroundColor: '#FFFFFF' // Beyaz arka plan
                           }}
                         >
-                          {/* Görseller sadece ilk sayfada */}
+                          {/* Görseller sadece ilk sayfada - ÜSTTE */}
                           {pageIndex === 0 && previewData.images?.map((img: TemplateImage) => (
                             <img
                               key={img.id}
@@ -1333,7 +1471,7 @@ export default function EvraklarPage() {
                                 objectFit: 'contain',
                                 pointerEvents: 'none',
                                 userSelect: 'none',
-                                zIndex: 1
+                                zIndex: 10 // Yüksek z-index - yazıların üstünde
                               }}
                               draggable={false}
                             />
@@ -1345,16 +1483,19 @@ export default function EvraklarPage() {
                               fontSize: previewData.styles?.fontSize || '14px',
                               fontFamily: previewData.styles?.fontFamily || 'Arial',
                               color: '#000',
-                              lineHeight: '1.6',
+                              lineHeight: '1.8', // Daha geniş satır aralığı
                               position: 'relative',
                               zIndex: 2,
-                              height: `${contentAreaHeight}px`,
-                              overflow: 'hidden'
+                              minHeight: `${contentAreaHeight}px`, // minHeight kullan
+                              overflow: 'hidden', // Sayfa sınırları içinde tut
+                              paddingBottom: '15px' // Alt kısım için ekstra boşluk
                             }}
                           >
                             <div
                               style={{
-                                transform: `translateY(-${pageIndex * contentAreaHeight}px)`
+                                transform: `translateY(-${pageIndex * contentAreaHeight}px)`,
+                                paddingBottom: '25px', // Alt yazılar için ekstra alan
+                                lineHeight: '1.8' // Satır yüksekliği
                               }}
                               dangerouslySetInnerHTML={{ __html: previewData.contentHTML }}
                             />
@@ -1373,6 +1514,105 @@ export default function EvraklarPage() {
                           >
                             Sayfa {pageIndex + 1} / {numPages}
                           </div>
+                          
+                          {/* Crop Marks (+ işaretleri) - Her sayfanın 4 köşesi */}
+                          {(() => {
+                            const markSize = 20; // + işaretinin uzunluğu
+                            const markThickness = 2; // + işaretinin kalınlığı
+                            const offset = 10; // Sayfa kenarından uzaklık
+                            
+                            return (
+                              <>
+                                {/* Sol Üst Köşe */}
+                                <div style={{
+                                  position: 'absolute',
+                                  left: `${offset}px`,
+                                  top: `${offset - markSize/2}px`,
+                                  width: `${markThickness}px`,
+                                  height: `${markSize}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                <div style={{
+                                  position: 'absolute',
+                                  left: `${offset - markSize/2}px`,
+                                  top: `${offset}px`,
+                                  width: `${markSize}px`,
+                                  height: `${markThickness}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                
+                                {/* Sağ Üst Köşe */}
+                                <div style={{
+                                  position: 'absolute',
+                                  right: `${offset}px`,
+                                  top: `${offset - markSize/2}px`,
+                                  width: `${markThickness}px`,
+                                  height: `${markSize}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                <div style={{
+                                  position: 'absolute',
+                                  right: `${offset - markSize/2}px`,
+                                  top: `${offset}px`,
+                                  width: `${markSize}px`,
+                                  height: `${markThickness}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                
+                                {/* Sol Alt Köşe */}
+                                <div style={{
+                                  position: 'absolute',
+                                  left: `${offset}px`,
+                                  bottom: `${offset - markSize/2}px`,
+                                  width: `${markThickness}px`,
+                                  height: `${markSize}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                <div style={{
+                                  position: 'absolute',
+                                  left: `${offset - markSize/2}px`,
+                                  bottom: `${offset}px`,
+                                  width: `${markSize}px`,
+                                  height: `${markThickness}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                
+                                {/* Sağ Alt Köşe */}
+                                <div style={{
+                                  position: 'absolute',
+                                  right: `${offset}px`,
+                                  bottom: `${offset - markSize/2}px`,
+                                  width: `${markThickness}px`,
+                                  height: `${markSize}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                                <div style={{
+                                  position: 'absolute',
+                                  right: `${offset - markSize/2}px`,
+                                  bottom: `${offset}px`,
+                                  width: `${markSize}px`,
+                                  height: `${markThickness}px`,
+                                  backgroundColor: '#000',
+                                  pointerEvents: 'none',
+                                  zIndex: 15
+                                }} />
+                              </>
+                            );
+                          })()}
                         </div>
                       ));
                     })()}
