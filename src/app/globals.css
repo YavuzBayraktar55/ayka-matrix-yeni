@@ -190,6 +190,23 @@ body {
   will-change: transform, opacity;
 }
 
+/* Slide in from top for mobile menu */
+@keyframes slide-in-from-top {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-in-from-top {
+  animation: slide-in-from-top 320ms cubic-bezier(.22,.9,.33,1) both;
+  will-change: transform, opacity;
+}
+
 /* Smooth transitions for all interactive elements */
 button, a, input, select, textarea {
   transition: all 0.2s ease-in-out;

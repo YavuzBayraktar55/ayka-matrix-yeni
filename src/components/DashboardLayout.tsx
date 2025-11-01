@@ -198,19 +198,131 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         
         {/* Content Area - Main */}
         <div className="flex flex-1 overflow-hidden relative">
+          {/* Mobile Top Menu Bar - Only on mobile */}
+          <div className={cn(
+            'md:hidden fixed top-0 left-0 right-0 z-[100] flex items-center justify-between px-4 py-3 border-b',
+            isDark 
+              ? 'bg-gray-900/95 border-gray-700/50' 
+              : 'bg-white/95 border-gray-300/50',
+            'backdrop-blur-2xl shadow-lg'
+          )}>
+            <img src={isDark ? '/logoLGT.png' : '/logo.png'} alt="Ayka Logo" className="h-8" />
+            
+            <div className="flex items-center gap-2">
+              {/* Tema Toggle */}
+              <button
+                onClick={toggleTheme}
+                className={cn(
+                  'p-2 rounded-lg transition-colors',
+                  isDark 
+                    ? 'text-gray-400 hover:bg-gray-800 hover:text-yellow-400' 
+                    : 'text-gray-600 hover:bg-gray-200 hover:text-blue-600'
+                )}
+              >
+                {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+
+              {/* Profile Button - Opens Profile Panel */}
+              <button
+                onClick={() => setProfileOpen(!profileOpen)}
+                className={cn(
+                  'p-1 rounded-full transition-all duration-200',
+                  profileOpen
+                    ? isDark ? 'ring-2 ring-blue-500' : 'ring-2 ring-blue-600'
+                    : ''
+                )}
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+                  <User className="w-4 h-4 text-white" />
+                </div>
+              </button>
+
+              {/* Hamburger Menu Button */}
+              <button
+                onClick={() => setMobileMenuOpen(true)}
+                className={cn(
+                  'p-2 rounded-lg transition-colors',
+                  isDark 
+                    ? 'text-gray-400 hover:bg-gray-800 hover:text-white' 
+                    : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
+                )}
+              >
+                <Menu className="w-6 h-6" />
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile Profile Panel - Slide from top */}
+          {profileOpen && (
+            <div 
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[150] md:hidden"
+              onClick={() => setProfileOpen(false)}
+            >
+              <div 
+                className={cn(
+                  'absolute top-0 left-0 right-0 rounded-b-3xl p-6 pt-20',
+                  isDark 
+                    ? 'bg-gray-900/98 border-b border-gray-700/50' 
+                    : 'bg-white/98 border-b border-gray-300/50',
+                  'backdrop-blur-2xl shadow-2xl slide-in-from-top'
+                )}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex flex-col items-center gap-4">
+                  {/* Profile Avatar */}
+                  <div className="w-20 h-20 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-xl">
+                    <User className="w-10 h-10 text-white" />
+                  </div>
+
+                  {/* User Info */}
+                  <div className="text-center">
+                    <h3 className={cn(
+                      'text-xl font-bold mb-1',
+                      isDark ? 'text-white' : 'text-gray-900'
+                    )}>
+                      {user?.PersonelInfo?.P_AdSoyad || 'Kullanıcı'}
+                    </h3>
+                    <p className={cn(
+                      'text-sm',
+                      isDark ? 'text-gray-400' : 'text-gray-600'
+                    )}>
+                      {getRoleLabel(user?.PersonelRole || '')}
+                    </p>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="w-full space-y-2 mt-4">
+                    <button
+                      onClick={() => {
+                        handleSignOut();
+                        setProfileOpen(false);
+                      }}
+                      className={cn(
+                        'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors',
+                        isDark 
+                          ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' 
+                          : 'bg-red-50 text-red-600 hover:bg-red-100'
+                      )}
+                    >
+                      <LogOut className="w-5 h-5" />
+                      <span className="font-medium">Çıkış Yap</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Main Content - Modern Design */}
-          <main
-            className={`
-              w-full overflow-y-auto transition-all duration-500 relative pb-24 sm:pb-28 md:pb-24
-              ${isDark 
-                ? 'bg-gradient-to-br from-gray-900/60 via-gray-800/50 to-gray-900/60' 
-                : 'bg-gradient-to-br from-white/60 via-gray-50/50 to-white/60'
-              }
-              backdrop-blur-md
-            `}
-            // make sure main content is padded above mobile browser UI (home indicator)
-            style={{ paddingBottom: `calc(6rem + env(safe-area-inset-bottom))` }}
-          >
+          <main className={`
+            w-full overflow-y-auto transition-all duration-500 relative
+            pt-16 md:pt-0 pb-0 md:pb-24
+            ${isDark 
+              ? 'bg-gradient-to-br from-gray-900/60 via-gray-800/50 to-gray-900/60' 
+              : 'bg-gradient-to-br from-white/60 via-gray-50/50 to-white/60'
+            }
+            backdrop-blur-md
+          `}>
             {/* Navigation Loading Overlay - Windows 11 Style */}
             {isNavigating && (
               <div className={`
@@ -295,37 +407,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
             >
               <div 
                 className={cn(
-                  'absolute bottom-0 left-0 right-0 rounded-t-3xl p-6 max-h-[80vh] overflow-y-auto',
+                  'absolute top-0 left-0 right-0 rounded-b-3xl p-6 pt-20 max-h-[85vh] overflow-y-auto',
                   isDark 
-                    ? 'bg-gray-900/98 border-t border-gray-700/50' 
-                    : 'bg-white/98 border-t border-gray-300/50',
-                  'backdrop-blur-2xl shadow-2xl slide-in-from-bottom'
+                    ? 'bg-gray-900/98 border-b border-gray-700/50' 
+                    : 'bg-white/98 border-b border-gray-300/50',
+                  'backdrop-blur-2xl shadow-2xl slide-in-from-top'
                 )}
                 onClick={(e) => e.stopPropagation()}
-                  // ensure mobile panel content respects safe-area (home indicator)
-                  style={{ paddingBottom: `calc(1rem + env(safe-area-inset-bottom))` }}
               >
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className={cn(
-                    'text-xl font-bold',
-                    isDark ? 'text-white' : 'text-gray-900'
-                  )}>
-                    Menü
-                  </h2>
-                  <button
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={cn(
-                      'p-2 rounded-lg transition-colors',
-                      isDark 
-                        ? 'text-gray-400 hover:bg-gray-800 hover:text-white' 
-                        : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
-                    )}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="grid grid-cols-2 gap-3">
                   {filteredMenuItems.map((item) => {
                     const Icon = item.icon;
                     const isActive = pathname === item.href;
@@ -355,53 +445,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     );
                   })}
                 </div>
-
-                {/* User Info in Mobile Menu */}
-                <div className={cn(
-                  'p-4 rounded-2xl mb-3',
-                  isDark ? 'bg-gray-800/50' : 'bg-gray-100/50'
-                )}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
-                      <User className="w-6 h-6 text-white" />
-                    </div>
-                    <div className="flex-1">
-                      <p className={cn(
-                        'text-sm font-semibold',
-                        isDark ? 'text-gray-100' : 'text-gray-900'
-                      )}>
-                        {user?.PersonelInfo?.P_AdSoyad || 'Kullanıcı'}
-                      </p>
-                      <p className={cn(
-                        'text-xs',
-                        isDark ? 'text-gray-400' : 'text-gray-600'
-                      )}>
-                        {getRoleLabel(user?.PersonelRole || '')}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => {
-                      handleSignOut();
-                      setMobileMenuOpen(false);
-                    }}
-                    className={cn(
-                      'w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl transition-colors',
-                      isDark 
-                        ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30' 
-                        : 'bg-red-50 text-red-600 hover:bg-red-100'
-                    )}
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span className="text-sm font-medium">Çıkış Yap</span>
-                  </button>
-                </div>
               </div>
             </div>
           )}
 
-          {/* Windows Taskbar Style - Alt - Desktop */}
-          <div className="fixed left-0 right-0 z-[9999]" style={{ bottom: 'env(safe-area-inset-bottom)', paddingBottom: 'calc(0.5rem + env(safe-area-inset-bottom))' }}>
+          {/* Windows Taskbar Style - Alt - Desktop Only */}
+          <div className="hidden md:block fixed bottom-0 left-0 right-0 z-[100]">
             <div className={cn(
               'flex items-center justify-between px-2 sm:px-3 py-2 sm:py-2.5 border-t',
               isDark 
@@ -409,27 +458,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 : 'bg-gray-100/98 border-gray-300/50',
               'backdrop-blur-2xl shadow-2xl'
             )}>
-              {/* Sol - Logo + Mobile Menu Button */}
+              {/* Sol - Logo */}
               <div className="flex items-center gap-2 flex-shrink-0">
-                {/* Mobile Menu Button - Only on small screens */}
-                <button
-                  onClick={() => setMobileMenuOpen(true)}
-                  className={cn(
-                    'md:hidden p-1.5 rounded-lg transition-colors',
-                    isDark 
-                      ? 'text-gray-400 hover:bg-gray-800 hover:text-white' 
-                      : 'text-gray-600 hover:bg-gray-200 hover:text-gray-900'
-                  )}
-                  title="Menü"
-                >
-                  <Menu className="w-5 h-5" />
-                </button>
-                {/* Constrain logo to taskbar sizes so it doesn't resize the bar. Use different image for dark mode if provided. */}
-                <img src={isDark ? '/logoLGT.png' : '/logo.png'} alt="Ayka Logo" className=" h-6 sm:h-9 " />
+                <img src={isDark ? '/logoLGT.png' : '/logo.png'} alt="Ayka Logo" className="h-6 sm:h-9" />
               </div>
 
-              {/* Orta - Menü Items - Hidden on Mobile, Show on Desktop */}
-              <div className="hidden md:flex flex-1 overflow-x-auto overflow-y-hidden mx-1 sm:mx-2 scrollbar-hide">
+              {/* Orta - Menü Items */}
+              <div className="flex flex-1 overflow-x-auto overflow-y-hidden mx-1 sm:mx-2 scrollbar-hide">
                 <div className="flex items-center justify-center gap-0.5 sm:gap-1 min-w-max w-full">
                   {filteredMenuItems.map((item) => {
                     const Icon = item.icon;
@@ -465,28 +500,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                     );
                   })}
                 </div>
-              </div>
-
-              {/* Mobile - Current Page Indicator */}
-              <div className="flex-1 flex items-center justify-center md:hidden">
-                {filteredMenuItems.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = pathname === item.href;
-                  if (!isActive) return null;
-
-                  return (
-                    <div 
-                      key={item.href}
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-1.5 rounded-lg',
-                        isDark ? 'text-blue-400' : 'text-blue-600'
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                      <span className="text-xs font-medium">{item.name}</span>
-                    </div>
-                  );
-                })}
               </div>
 
               {/* Sağ - User Panel + Tema + Saat */}
