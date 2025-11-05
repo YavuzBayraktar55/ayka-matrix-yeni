@@ -5,13 +5,6 @@
   --foreground: #171717;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0a0a;
@@ -253,7 +246,9 @@ button, a, input, select, textarea {
 /* A4 Sayfa Düzeni - Word-like ayrı sayfalar (Önizleme) */
 .a4-page {
   width: 794px !important;
-  height: 1123px !important; /* Sabit A4 yüksekliği */
+  height: 1123px !important; /* Sabit A4 yüksekliği - kesinlikle değişmez */
+  min-height: 1123px !important;
+  max-height: 1123px !important;
   background: white;
   position: relative;
   page-break-after: always;
@@ -264,6 +259,8 @@ button, a, input, select, textarea {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
 }
 
 /* A4 sayfadaki resimler için yüksek kalite */
@@ -340,7 +337,6 @@ button, a, input, select, textarea {
     /* Yüksek kalite yazdırma */
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
-    color-adjust: exact;
   }
 
   .a4-page {
@@ -399,13 +395,10 @@ button, a, input, select, textarea {
   display: inline-block;
 }
 
-/* Sayfa kenar boşlukları görünümü */
+/* Sayfa kenar boşlukları görünümü - KALDIRILDI (PDF'de sorun yaratıyor) */
 .a4-page::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.05);
+  content: none; /* Border'ı tamamen kaldır */
+  display: none;
 }
 
 /* Hide scrollbar */

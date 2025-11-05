@@ -59,7 +59,7 @@ async function migrateToAuth() {
   for (const personel of personeller as Personel[]) {
     try {
       // Supabase Auth'a kullanıcı ekle
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      const { error: authError } = await supabase.auth.admin.createUser({
         email: personel.PersonelEmail,
         password: personel.PersonelPassword,
         email_confirm: true, // Email doğrulaması gerekmesin
@@ -82,8 +82,9 @@ async function migrateToAuth() {
         console.log(`✅ Eklendi: ${personel.PersonelEmail} (${personel.PersonelRole})`);
         successCount++;
       }
-    } catch (error: any) {
-      console.error(`❌ Exception (${personel.PersonelEmail}):`, error.message);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`❌ Exception (${personel.PersonelEmail}):`, errorMessage);
       errorCount++;
     }
 

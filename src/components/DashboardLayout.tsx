@@ -144,8 +144,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       roles: ['saha_personeli', 'koordinator', 'insan_kaynaklari', 'yonetici']
     },
     {
-      name: 'Aylık Puantaj',
+      name: 'Puantaj Boyama',
       icon: Clock,
+      href: '/dashboard/puantaj-boyama',
+      roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
+    },
+    {
+      name: 'Puantaj',
+      icon: FileText,
       href: '/dashboard/puantaj',
       roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
     },

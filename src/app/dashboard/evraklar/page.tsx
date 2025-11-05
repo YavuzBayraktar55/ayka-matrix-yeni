@@ -347,20 +347,37 @@ export default function EvraklarPage() {
           const htmlEl = el as HTMLElement;
           // Box shadow'ları kaldır
           htmlEl.style.boxShadow = 'none';
+          htmlEl.style.border = 'none'; // Border'ları da kaldır
+          htmlEl.style.outline = 'none'; // Outline'ları da kaldır
+          
           // Görseller hariç TÜM arka planları beyaz yap (transparent dahil)
           if (htmlEl.tagName !== 'IMG') {
             htmlEl.style.backgroundColor = '#FFFFFF';
+          }
+          
+          // Crop marks (+ işaretleri) gibi gereksiz elementleri kaldır
+          // zIndex 15 olan veya 10 piksel civarında olan küçük div'leri gizle
+          if (htmlEl.tagName === 'DIV') {
+            const width = parseFloat(getComputedStyle(htmlEl).width);
+            const height = parseFloat(getComputedStyle(htmlEl).height);
+            const bgColor = getComputedStyle(htmlEl).backgroundColor;
+            
+            // Siyah, küçük (crop mark benzeri) elementleri gizle
+            if (bgColor === 'rgb(0, 0, 0)' && (width <= 25 || height <= 25)) {
+              htmlEl.style.display = 'none';
+            }
           }
         });
         
         wrapper.appendChild(clonedPage);
         document.body.appendChild(wrapper);
         
-        // Canvas'a dönüştür - yüksek çözünürlük
+        // Canvas'a dönüştür - maksimum çözünürlük
         const pageCanvas = await html2canvas(wrapper, {
           useCORS: true,
           allowTaint: true,
           logging: false,
+          scale: 3, // 3x çözünürlük - daha net
           width: 794,
           height: 1123,
           windowWidth: 794,
@@ -368,6 +385,8 @@ export default function EvraklarPage() {
           backgroundColor: '#FFFFFF', // Tam beyaz
           imageTimeout: 0,
           removeContainer: false,
+          letterRendering: true, // Metin render kalitesi artırıldı
+          foreignObjectRendering: false, // Daha iyi uyumluluk
           onclone: (clonedDoc: Document) => {
             // Klonlanan dokümanda da tüm arka planları beyaz yap
             const body = clonedDoc.body;
@@ -378,6 +397,21 @@ export default function EvraklarPage() {
                 const htmlEl = el as HTMLElement;
                 if (htmlEl.tagName !== 'IMG') {
                   htmlEl.style.backgroundColor = '#FFFFFF';
+                }
+                // Box shadow ve border'ları temizle
+                htmlEl.style.boxShadow = 'none';
+                htmlEl.style.border = 'none';
+                htmlEl.style.outline = 'none';
+                
+                // Crop marks gibi küçük siyah elementleri gizle
+                if (htmlEl.tagName === 'DIV') {
+                  const width = parseFloat(getComputedStyle(htmlEl).width);
+                  const height = parseFloat(getComputedStyle(htmlEl).height);
+                  const bgColor = getComputedStyle(htmlEl).backgroundColor;
+                  
+                  if (bgColor === 'rgb(0, 0, 0)' && (width <= 25 || height <= 25)) {
+                    htmlEl.style.display = 'none';
+                  }
                 }
               });
             }
@@ -392,30 +426,33 @@ export default function EvraklarPage() {
           pdf.addPage();
         }
         
-        // Yüksek çözünürlüklü canvas oluştur (scale 2 ile çalışmak için)
-        const scale = 2;
+        // Yüksek çözünürlüklü canvas oluştur (scale 3 ile daha yüksek kalite)
+        const scale = 3; // 2'den 3'e çıkarıldı - daha net PDF
         const whiteCanvas = document.createElement('canvas');
         whiteCanvas.width = 794 * scale;
         whiteCanvas.height = 1123 * scale;
-        const ctx = whiteCanvas.getContext('2d', { alpha: false });
+        const ctx = whiteCanvas.getContext('2d', { 
+          alpha: false,
+          willReadFrequently: false // Performans optimizasyonu
+        });
         
         if (ctx) {
           // 1. TAM beyaz arka plan (#FFFFFF)
           ctx.fillStyle = '#FFFFFF';
           ctx.fillRect(0, 0, 794 * scale, 1123 * scale);
           
-          // 2. Kalite ayarları
+          // 2. Maksimum kalite ayarları
           ctx.imageSmoothingEnabled = true;
           ctx.imageSmoothingQuality = 'high';
           
-          // 3. İçeriği yüksek çözünürlükte çiz
+          // 3. İçeriği çok yüksek çözünürlükte çiz
           ctx.drawImage(pageCanvas, 0, 0, 794 * scale, 1123 * scale);
           
-          // 4. PNG'ye çevir (maksimum kalite)
+          // 4. JPEG yerine PNG kullan (kayıpsız sıkıştırma)
           const imgData = whiteCanvas.toDataURL('image/png', 1.0);
           
-          // 5. PDF'e ekle - SLOW kompresyon ile
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'SLOW');
+          // 5. PDF'e ekle - FAST yerine NONE (sıkıştırma yok, maksimum kalite)
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'NONE');
           
           console.log(`✅ Sayfa ${i + 1} eklendi (794x1123px → ${pdfWidth}x${pdfHeight}mm)`);
         }
@@ -1426,9 +1463,9 @@ export default function EvraklarPage() {
                   >
                     {/* Çok Sayfalı Düzen - Her sayfa ayrı A4 */}
                     {(() => {
-                      // Geçici div oluştur ve yüksekliği hesapla
+                      // İçerik yüksekliğini hesapla
                       const tempDiv = document.createElement('div');
-                      tempDiv.style.width = '634px'; // 794 - 160 (padding)
+                      tempDiv.style.width = '634px'; // 794 - 160 (padding: 80px left + 80px right)
                       tempDiv.style.position = 'absolute';
                       tempDiv.style.visibility = 'hidden';
                       tempDiv.style.fontSize = previewData.styles?.fontSize || '14px';
@@ -1440,10 +1477,12 @@ export default function EvraklarPage() {
                       document.body.removeChild(tempDiv);
 
                       const pageHeight = 1123;
-                      const contentAreaHeight = pageHeight - 150; // 60 (top) + 90 (bottom)
+                      const topPadding = 60;
+                      const bottomPadding = 120;
+                      const contentAreaHeight = pageHeight - topPadding - bottomPadding; // 943px
                       const numPages = Math.ceil(contentHeight / contentAreaHeight);
 
-                      console.log(`📄 İçerik yüksekliği: ${contentHeight}px, ${numPages} sayfa`);
+                      console.log(`📄 İçerik: ${contentHeight}px | Sayfa alan: ${contentAreaHeight}px | Sayfa sayısı: ${numPages}`);
 
                       return Array.from({ length: Math.max(1, numPages) }).map((_, pageIndex) => (
                         <div
@@ -1451,9 +1490,12 @@ export default function EvraklarPage() {
                           className="a4-page"
                           style={{
                             marginBottom: pageIndex < numPages - 1 ? '20px' : '0',
-                            padding: '60px 80px 90px 80px', // Tüm sayfalarda aynı padding
-                            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)', // Hafif gölge
-                            backgroundColor: '#FFFFFF' // Beyaz arka plan
+                            padding: '60px 80px 120px 80px', // Alt padding arttırıldı (90→120)
+                            boxShadow: 'none',
+                            backgroundColor: '#FFFFFF',
+                            border: 'none',
+                            height: '1123px', // Sabit yükseklik
+                            overflow: 'hidden' // Taşan içerik gizlensin
                           }}
                         >
                           {/* Görseller sadece ilk sayfada - ÜSTTE */}
@@ -1477,25 +1519,25 @@ export default function EvraklarPage() {
                             />
                           ))}
 
-                          {/* İçerik - Her sayfada doğru dilim göster */}
+                          {/* İçerik - Her sayfada tam içeriği göster, clip ile kes */}
                           <div
                             style={{
-                              fontSize: previewData.styles?.fontSize || '14px',
-                              fontFamily: previewData.styles?.fontFamily || 'Arial',
-                              color: '#000',
-                              lineHeight: '1.8', // Daha geniş satır aralığı
                               position: 'relative',
                               zIndex: 2,
-                              minHeight: `${contentAreaHeight}px`, // minHeight kullan
-                              overflow: 'hidden', // Sayfa sınırları içinde tut
-                              paddingBottom: '15px' // Alt kısım için ekstra boşluk
+                              height: `${contentAreaHeight}px`,
+                              overflow: 'hidden'
                             }}
                           >
                             <div
                               style={{
-                                transform: `translateY(-${pageIndex * contentAreaHeight}px)`,
-                                paddingBottom: '25px', // Alt yazılar için ekstra alan
-                                lineHeight: '1.8' // Satır yüksekliği
+                                fontSize: previewData.styles?.fontSize || '14px',
+                                fontFamily: previewData.styles?.fontFamily || 'Arial',
+                                color: '#000',
+                                lineHeight: '1.6',
+                                position: 'absolute',
+                                top: `-${pageIndex * contentAreaHeight}px`,
+                                left: '0',
+                                width: '100%'
                               }}
                               dangerouslySetInnerHTML={{ __html: previewData.contentHTML }}
                             />
@@ -1505,7 +1547,7 @@ export default function EvraklarPage() {
                           <div
                             style={{
                               position: 'absolute',
-                              bottom: '30px',
+                              bottom: '40px',
                               right: '80px',
                               fontSize: '10px',
                               color: '#999',
@@ -1515,104 +1557,7 @@ export default function EvraklarPage() {
                             Sayfa {pageIndex + 1} / {numPages}
                           </div>
                           
-                          {/* Crop Marks (+ işaretleri) - Her sayfanın 4 köşesi */}
-                          {(() => {
-                            const markSize = 20; // + işaretinin uzunluğu
-                            const markThickness = 2; // + işaretinin kalınlığı
-                            const offset = 10; // Sayfa kenarından uzaklık
-                            
-                            return (
-                              <>
-                                {/* Sol Üst Köşe */}
-                                <div style={{
-                                  position: 'absolute',
-                                  left: `${offset}px`,
-                                  top: `${offset - markSize/2}px`,
-                                  width: `${markThickness}px`,
-                                  height: `${markSize}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                <div style={{
-                                  position: 'absolute',
-                                  left: `${offset - markSize/2}px`,
-                                  top: `${offset}px`,
-                                  width: `${markSize}px`,
-                                  height: `${markThickness}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                
-                                {/* Sağ Üst Köşe */}
-                                <div style={{
-                                  position: 'absolute',
-                                  right: `${offset}px`,
-                                  top: `${offset - markSize/2}px`,
-                                  width: `${markThickness}px`,
-                                  height: `${markSize}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                <div style={{
-                                  position: 'absolute',
-                                  right: `${offset - markSize/2}px`,
-                                  top: `${offset}px`,
-                                  width: `${markSize}px`,
-                                  height: `${markThickness}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                
-                                {/* Sol Alt Köşe */}
-                                <div style={{
-                                  position: 'absolute',
-                                  left: `${offset}px`,
-                                  bottom: `${offset - markSize/2}px`,
-                                  width: `${markThickness}px`,
-                                  height: `${markSize}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                <div style={{
-                                  position: 'absolute',
-                                  left: `${offset - markSize/2}px`,
-                                  bottom: `${offset}px`,
-                                  width: `${markSize}px`,
-                                  height: `${markThickness}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                
-                                {/* Sağ Alt Köşe */}
-                                <div style={{
-                                  position: 'absolute',
-                                  right: `${offset}px`,
-                                  bottom: `${offset - markSize/2}px`,
-                                  width: `${markThickness}px`,
-                                  height: `${markSize}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                                <div style={{
-                                  position: 'absolute',
-                                  right: `${offset - markSize/2}px`,
-                                  bottom: `${offset}px`,
-                                  width: `${markSize}px`,
-                                  height: `${markThickness}px`,
-                                  backgroundColor: '#000',
-                                  pointerEvents: 'none',
-                                  zIndex: 15
-                                }} />
-                              </>
-                            );
-                          })()}
+                          {/* Crop Marks KALDIRILDI - PDF'de görünmemeli */}
                         </div>
                       ));
                     })()}

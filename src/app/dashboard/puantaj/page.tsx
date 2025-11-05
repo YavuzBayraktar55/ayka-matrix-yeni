@@ -1,53 +1,44 @@
-'use client';
+﻿'use client';
 
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { createClient } from '@/lib/supabase/client';
-import { Calendar, ChevronLeft, ChevronRight, Save, X } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export const dynamic = 'force-dynamic';
 
-// Singleton Supabase client
 const supabase = createClient();
 
-// Varsayılan 6 şablon
-const VARSAYILAN_SABLONLAR = [
-  { id: 1, isim: 'Tam Çalışma Günü', renk: '#10b981', baslangic: '08:00', bitis: '18:00', mola: 90 },
-  { id: 2, isim: 'Yarım Çalışma Günü', renk: '#3b82f6', baslangic: '08:00', bitis: '14:00', mola: 0 },
-  { id: 3, isim: 'Okuma Tam Gün', renk: '#8b5cf6', baslangic: '08:00', bitis: '18:00', mola: 90 },
-  { id: 4, isim: 'Ayarlanabilir', renk: '#f59e0b', baslangic: null, bitis: null, mola: 0 },
-  { id: 5, isim: 'Resmi Tatil', renk: '#ef4444', baslangic: null, bitis: null, mola: 0 },
-  { id: 6, isim: 'Hafta Tatili', renk: '#6366f1', baslangic: null, bitis: null, mola: 0 }
-];
-
-interface Sablon {
-  id: number;
-  isim: string;
-  renk: string;
-  baslangic: string | null;
-  bitis: string | null;
-  mola: number;
+interface Personel {
+  PersonelTcKimlik: number;
+  P_AdSoyad: string;
+  P_AykaSozlesmeTarihi: string | null;
 }
 
-interface GunVerisi {
-  isim: string;
-  renk: string;
-  baslangic: string | null;
-  bitis: string | null;
-  mola: number;
-}
-
-interface AylikPuantaj {
-  PuantajID: number;
+interface BolgeInfo {
   BolgeID: number;
-  YilAy: string;
-  TakvimJSON: string; // { "2024-10-01": { isim: "Normal Mesai", renk: "#10b981", baslangic: "08:00", bitis: "17:00", mola: 60 }, ... }
-  SablonlarJSON: string; // 6 şablonun o anki hali (şablon düzenleme için)
-  Durum: 'hazirlanıyor' | 'kaydedildi';
+  BolgeAdi: string;
+  BolgeSicilNo: string;
+}
+
+interface PuantajHucre {
+  deger: string;
+  renk?: string;
+}
+
+interface PuantajSatir {
+  sira: number;
+  tcKimlik: number;
+  adSoyad: string;
+  iseGirisTarihi: string | null;
+  hucreler: Record<string, PuantajHucre>;
+  netSoforluk?: string;
+  gunlukBrut?: string;
+  yolYardimi?: string;
 }
 
 export default function PuantajPage() {
@@ -55,635 +46,678 @@ export default function PuantajPage() {
   const { isDark } = useTheme();
   
   const [loading, setLoading] = useState(true);
-  const [bolgeAdi, setBolgeAdi] = useState('');
+  const [bolge, setBolge] = useState<BolgeInfo | null>(null);
+  const [puantajVerisi, setPuantajVerisi] = useState<PuantajSatir[]>([]);
+  
   const [secilenAy, setSecilenAy] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
   
-  // 6 Şablon - Koordinatör düzenleyebilir
-  const [sablonlar, setSablonlar] = useState<Sablon[]>(VARSAYILAN_SABLONLAR);
-  const [sablonModalAcik, setSablonModalAcik] = useState(false);
+  const [gunler, setGunler] = useState<Date[]>([]);
+  const [puantajYuklenmedi, setPuantajYuklenmedi] = useState(false);
   
-  // Aylık puantaj
-  const [aylikPuantaj, setAylikPuantaj] = useState<AylikPuantaj | null>(null);
-  const [takvimVerisi, setTakvimVerisi] = useState<Record<string, GunVerisi>>({});
-  
-  // Seçili gün
-  const [secilenGun, setSecilenGun] = useState<string | null>(null);
-  const [secimModalAcik, setSecimModalAcik] = useState(false);
-
-  const takvimGunleri = () => {
-    const [yil, ay] = secilenAy.split('-').map(Number);
-    const ilkGun = new Date(yil, ay - 1, 1);
-    const sonGun = new Date(yil, ay, 0);
-    let baslangic = ilkGun.getDay() - 1;
-    if (baslangic === -1) baslangic = 6;
-    const gunler: Date[] = [];
-    for (let i = baslangic - 1; i >= 0; i--) {
-      gunler.push(new Date(yil, ay - 1, -i));
-    }
-    for (let i = 1; i <= sonGun.getDate(); i++) {
-      gunler.push(new Date(yil, ay - 1, i));
-    }
-    return gunler;
-  };
+  const tableContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (user?.BolgeID) yukleVeriler();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, secilenAy]);
+    const [yil, ay] = secilenAy.split('-').map(Number);
+    const sonGun = new Date(yil, ay, 0).getDate();
+    const gunListesi: Date[] = [];
+    
+    for (let i = 1; i <= sonGun; i++) {
+      gunListesi.push(new Date(yil, ay - 1, i));
+    }
+    
+    setGunler(gunListesi);
+  }, [secilenAy]);
 
-  const yukleVeriler = async () => {
+  const yukleVeriler = useCallback(async () => {
+    if (!user?.BolgeID) return;
     setLoading(true);
     try {
-      const { data: bolge } = await supabase
+      const { data: bolgeData } = await supabase
         .from('BolgeInfo')
-        .select('BolgeAdi')
-        .eq('BolgeID', user?.BolgeID)
+        .select('BolgeID, BolgeAdi, BolgeSicilNo')
+        .eq('BolgeID', user!.BolgeID)
         .single();
-      if (bolge?.BolgeAdi) setBolgeAdi(bolge.BolgeAdi);
+      
+      if (bolgeData) setBolge(bolgeData);
 
-      // Bölgenin son kullandığı şablonları yükle (en son kaydedilen aydan)
-      const { data: sonPuantaj } = await supabase
-        .from('AylikPuantaj')
-        .select('SablonlarJSON')
-        .eq('BolgeID', user?.BolgeID)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+      const { data: personelData } = await supabase
+        .from('PersonelInfo')
+        .select(`
+          PersonelTcKimlik,
+          P_AdSoyad,
+          P_AykaSozlesmeTarihi,
+          PersonelLevelizasyon!inner(BolgeID)
+        `)
+        .eq('PersonelLevelizasyon.BolgeID', user!.BolgeID)
+        .order('P_AdSoyad', { ascending: true });
 
-      if (sonPuantaj?.SablonlarJSON) {
-        try {
-          const yuklenenSablonlar = JSON.parse(sonPuantaj.SablonlarJSON);
-          setSablonlar(yuklenenSablonlar);
-        } catch {
-          setSablonlar(VARSAYILAN_SABLONLAR);
-        }
-      }
+      if (personelData) {
+        const personelList: Personel[] = personelData.map((p: Record<string, unknown>) => ({
+          PersonelTcKimlik: p.PersonelTcKimlik as number,
+          P_AdSoyad: (p.P_AdSoyad as string) || 'Isimsiz',
+          P_AykaSozlesmeTarihi: p.P_AykaSozlesmeTarihi as string | null
+        }));
 
-      await yukleAylikPuantaj();
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
+        // build empty rows first
+        const satirlar: PuantajSatir[] = personelList.map((p, index) => ({
+          sira: index + 1,
+          tcKimlik: p.PersonelTcKimlik,
+          adSoyad: p.P_AdSoyad,
+          iseGirisTarihi: p.P_AykaSozlesmeTarihi,
+            hucreler: {},
+            netSoforluk: '',
+            gunlukBrut: '',
+            yolYardimi: ''
+        }));
 
-  const yukleAylikPuantaj = async () => {
-    const { data } = await supabase
-      .from('AylikPuantaj')
-      .select('*')
-      .eq('BolgeID', user?.BolgeID)
-      .eq('YilAy', secilenAy)
-      .single();
+        // Fetch AylikPuantaj (puantaj boyama) for this Bolge and month
+        const { data: aylikPuantaj } = await supabase
+          .from('AylikPuantaj')
+          .select('PuantajID, TakvimJSON, Durum')
+          .eq('BolgeID', user!.BolgeID)
+          .eq('YilAy', secilenAy)
+          .single();
 
-    if (data) {
-      setAylikPuantaj(data);
-      try {
-        const takvim = JSON.parse(data.TakvimJSON || '{}');
-        setTakvimVerisi(takvim);
-      } catch {
-        setTakvimVerisi({});
-      }
-      try {
-        const sablonlarSnapshot = JSON.parse(data.SablonlarJSON || '[]');
-        if (sablonlarSnapshot.length === 6) {
-          setSablonlar(sablonlarSnapshot);
-        }
-      } catch {}
-    } else {
-      setAylikPuantaj(null);
-      setTakvimVerisi({});
-    }
-  };
-
-  const ayBaslat = async () => {
-    if (!user) return;
-    try {
-      // Boş takvim oluştur - Her gün için şablonun değerlerini snapshot olarak kaydet
-      const gunler = takvimGunleri().filter(g => {
-        const [, ay] = secilenAy.split('-').map(Number);
-        return g.getMonth() === ay - 1;
-      });
-
-      const bosTakvim: Record<string, GunVerisi> = {};
-      gunler.forEach(gun => {
-        const tarih = gun.toISOString().split('T')[0];
-        const gunNo = gun.getDay(); // 0=Pazar, 6=Cumartesi
-        const gunSayisi = gun.getDate(); // Ayın kaçıncı günü
-        
-        let varsayilanSablon: Sablon;
-        
-        if (gunSayisi <= 8) {
-          // İlk 8 gün (Pazar dahil) => Okuma Tam Gün (id=3)
-          varsayilanSablon = sablonlar.find(s => s.id === 3) || sablonlar[2];
-        } else if (gunNo === 6) {
-          // Cumartesi (okuma sonrası) => Yarım Çalışma Günü (id=2)
-          varsayilanSablon = sablonlar.find(s => s.id === 2) || sablonlar[1];
-        } else if (gunNo === 0) {
-          // Pazar (okuma sonrası) => Hafta Tatili (id=6)
-          varsayilanSablon = sablonlar.find(s => s.id === 6) || sablonlar[5];
+        if (!aylikPuantaj) {
+          // No puantaj boyama found -> set state to show in-page refresh/banner
+          setPuantajVerisi(satirlar);
+          setPuantajYuklenmedi(true);
         } else {
-          // Diğer hafta içi günler => Tam Çalışma Günü (id=1)
-          varsayilanSablon = sablonlar.find(s => s.id === 1) || sablonlar[0];
+          setPuantajYuklenmedi(false);
+          // parse TakvimJSON and map to each satir hücreleri (same for all personnel)
+          let takvim: Record<string, { isim?: string }> = {};
+          try {
+            takvim = typeof aylikPuantaj.TakvimJSON === 'string' ? JSON.parse(aylikPuantaj.TakvimJSON) : aylikPuantaj.TakvimJSON || {};
+          } catch (error) {
+            console.error('TakvimJSON parse error', error);
+          }
+
+          // Only pull "Resmi Tatil" and "Hafta Tatili" from puantaj boyama.
+          // Use legend symbol and normal yellow color for both.
+          const LEGEND_YELLOW = '#facc15';
+
+          const isResmi = (isim: string) => isim && isim.toLowerCase().includes('resmi');
+          const isHafta = (isim: string) => isim && isim.toLowerCase().includes('hafta');
+
+          // for each satir and date, populate hucreler only for Resmi Tatil (RT) and Hafta Tatili (T)
+          satirlar.forEach((satir) => {
+            gunler.forEach((gun) => {
+              const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+              const entry = takvim[tarih];
+              if (entry && entry.isim) {
+                const isim = String(entry.isim || '');
+                if (isResmi(isim)) {
+                  satir.hucreler[tarih] = { deger: 'RT', renk: LEGEND_YELLOW };
+                } else if (isHafta(isim)) {
+                  satir.hucreler[tarih] = { deger: 'T', renk: LEGEND_YELLOW };
+                }
+                // otherwise: ignore other types and leave cell empty (white)
+              }
+            });
+          });
+
+          // Now fetch approved leave (izin) records for personnel in this region and month
+          try {
+            const personelTcList = personelList.map(p => p.PersonelTcKimlik);
+            const [yilStr, ayStr] = secilenAy.split('-');
+            const firstDay = `${yilStr}-${ayStr}-01`;
+            const lastDay = `${yilStr}-${String(Number(ayStr)).padStart(2, '0')}-${new Date(Number(yilStr), Number(ayStr), 0).getDate()}`;
+
+            const { data: izinData } = await supabase
+              .from('IzinTalepleri')
+              .select('TalepID, PersonelTcKimlik, IzinTuru, BaslangicTarihi, BitisTarihi, Durum, KoordinatorOnayTarihi, YonetimOnayTarihi')
+              .in('PersonelTcKimlik', personelTcList)
+              .lte('BaslangicTarihi', lastDay)
+              .gte('BitisTarihi', firstDay);
+
+            if (izinData && Array.isArray(izinData)) {
+              // simple helper to determine if a leave row is approved
+              // Determine whether an izin row should be considered approved.
+              // Accepts a variety of signals: Durum text containing approval words,
+              // or presence of coordinator/management approval timestamps.
+              interface IzinRow {
+                TalepID: number;
+                PersonelTcKimlik: number;
+                IzinTuru: string;
+                BaslangicTarihi: string;
+                BitisTarihi: string;
+                Durum?: string | number;
+                KoordinatorOnayTarihi?: string;
+                YonetimOnayTarihi?: string;
+              }
+              
+              const isApproved = (row: IzinRow) => {
+                try {
+                  if (!row) return false;
+                  // Check textual status (case-insensitive)
+                  if (row?.Durum && typeof row.Durum === 'string') {
+                    const d = row.Durum.toLowerCase();
+                    if (d.includes('onay') || d.includes('approved') || d.includes('tamam') || d.includes('onaylandi') || d.includes('onaylandı')) return true;
+                  }
+                  // Some flows store approval timestamps instead of a textual status
+                  if (row?.KoordinatorOnayTarihi || row?.YonetimOnayTarihi) return true;
+                  // If Durum is a numeric code (e.g. 1/2) treat common accepted codes as approved
+                  if (typeof row?.Durum === 'number') {
+                    // assume 1 or 2 are approved in some systems; adjust if your app uses different codes
+                    if (row.Durum === 1 || row.Durum === 2) return true;
+                  }
+                } catch (error) {
+                  // ignore and treat as not approved
+                  console.error('Error checking approval status:', error);
+                }
+                return false;
+              };
+
+              const izinMap: Record<string, IzinRow[]> = {};
+              izinData.forEach((iz: IzinRow) => {
+                if (!isApproved(iz)) return; // skip not-approved
+                const start = new Date(iz.BaslangicTarihi);
+                const end = new Date(iz.BitisTarihi);
+                for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+                  const tarih = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                  if (!izinMap[tarih]) izinMap[tarih] = [];
+                  izinMap[tarih].push(iz);
+                }
+              });
+
+              // mapping of IzinTuru to symbol & color
+              const izinTypeToSymbol = (t: string | null | undefined) => {
+                // Map common izin type strings to a display symbol and color.
+                // Falls back to a red 'I' (unpaid) if unknown.
+                if (!t) return { symbol: 'I', color: '#ef4444' };
+                const s = String(t).toLowerCase();
+                if (s.includes('ucretli') || s.includes('ücretli') || s.includes('paid')) return { symbol: 'Ü', color: '#facc15' };
+                if (s.includes('ucretsiz') || s.includes('ücretsiz') || s.includes('unpaid')) return { symbol: 'I', color: '#ef4444' };
+                if (s.includes('yillik') || s.includes('yıllık') || s.includes('yillik izin') || s.includes('yıllık izin')) return { symbol: 'YI', color: '#3b82f6' };
+                if (s.includes('rapor') || s.includes('saglik')) return { symbol: 'R', color: '#10b981' };
+                // fallback: log for debugging and return unpaid symbol
+                // console.debug(`Unknown IzinTuru mapping for: ${t}`);
+                return { symbol: 'I', color: '#ef4444' };
+              };
+
+              // Apply izin entries to satirlar: do not override RT/T from takvim
+              satirlar.forEach((satir) => {
+                gunler.forEach((gun) => {
+                  const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+                  const hucre = satir.hucreler[tarih];
+                  // if already RT or T, keep as is
+                  if (hucre && (hucre.deger === 'RT' || hucre.deger === 'T')) return;
+                  const izler = izinMap[tarih];
+                  if (izler && izler.length > 0) {
+                    // pick the first matching izin for this person (there may be multiple overlapping, so filter by person)
+                    const personIzin = izler.find((z) => Number(z.PersonelTcKimlik) === Number(satir.tcKimlik));
+                    if (personIzin) {
+                      const mapped = izinTypeToSymbol(personIzin.IzinTuru);
+                      satir.hucreler[tarih] = { deger: mapped.symbol, renk: mapped.color };
+                    }
+                  }
+                });
+              });
+            }
+          } catch (error) {
+            console.error('Izin verisi cekme hatasi', error);
+          }
+
+          setPuantajVerisi(satirlar);
         }
-        
-        bosTakvim[tarih] = {
-          isim: varsayilanSablon.isim,
-          renk: varsayilanSablon.renk,
-          baslangic: varsayilanSablon.baslangic,
-          bitis: varsayilanSablon.bitis,
-          mola: varsayilanSablon.mola
-        };
-      });
-
-      const { data } = await supabase
-        .from('AylikPuantaj')
-        .insert({
-          BolgeID: user.BolgeID,
-          YilAy: secilenAy,
-          TakvimJSON: JSON.stringify(bosTakvim),
-          SablonlarJSON: JSON.stringify(sablonlar),
-          Durum: 'hazirlanıyor',
-          KaydedenKisi: user.PersonelTcKimlik
-        })
-        .select()
-        .single();
-
-      if (data) {
-        await yukleAylikPuantaj();
-        alert('Ay başlatıldı! Şimdi günleri boyayabilirsiniz.');
       }
     } catch (error) {
-      console.error(error);
-      alert('Hata oluştu!');
+      console.error('Veri yukleme hatasi:', error);
     }
-  };
+    setLoading(false);
+  }, [user, secilenAy, gunler]);
 
-  const gunBoya = async (tarih: string, sablon: Sablon) => {
-    if (!aylikPuantaj) return;
-    
-    // Şablonun o anki değerlerini snapshot olarak kaydet
-    const gunVerisi: GunVerisi = {
-      isim: sablon.isim,
-      renk: sablon.renk,
-      baslangic: sablon.baslangic,
-      bitis: sablon.bitis,
-      mola: sablon.mola
-    };
-    
-    const yeniTakvim = { ...takvimVerisi, [tarih]: gunVerisi };
-    setTakvimVerisi(yeniTakvim);
-    
-    // Database'e kaydet
-    supabase
-      .from('AylikPuantaj')
-      .update({ TakvimJSON: JSON.stringify(yeniTakvim) })
-      .eq('PuantajID', aylikPuantaj.PuantajID)
-      .then(() => {
-        setSecimModalAcik(false);
-        setSecilenGun(null);
-      });
-  };
+  useEffect(() => {
+    if (user?.BolgeID) {
+      void yukleVeriler();
+    }
+  }, [user, yukleVeriler]);
 
-  const ayiKaydet = async () => {
-    if (!aylikPuantaj) return;
-    
-    await supabase
-      .from('AylikPuantaj')
-      .update({ 
-        Durum: 'kaydedildi',
-        KayitTarihi: new Date().toISOString(),
-        SablonlarJSON: JSON.stringify(sablonlar),
-        TakvimJSON: JSON.stringify(takvimVerisi)
-      })
-      .eq('PuantajID', aylikPuantaj.PuantajID);
-    
-    await yukleAylikPuantaj();
-    alert('Ay kaydedildi! Artık değiştirilemez.');
-  };
-
-  const sablonlariKaydet = () => {
-    // Sadece UI'da güncelle, database'e ay kaydedildiğinde gidecek
-    setSablonModalAcik(false);
-    alert('Şablonlar güncellendi! "Ayı Kaydet" butonuna basarak kaydedin.');
-  };
-
-  const ayDegistir = (yon: 'prev' | 'next') => {
+  const ayDegistir = (yon: 'onceki' | 'sonraki') => {
     const [yil, ay] = secilenAy.split('-').map(Number);
-    let yeniYil = yil, yeniAy = ay;
-    if (yon === 'prev') {
+    let yeniYil = yil;
+    let yeniAy = ay;
+    
+    if (yon === 'onceki') {
       yeniAy--;
-      if (yeniAy === 0) { yeniAy = 12; yeniYil--; }
+      if (yeniAy < 1) {
+        yeniAy = 12;
+        yeniYil--;
+      }
     } else {
       yeniAy++;
-      if (yeniAy === 13) { yeniAy = 1; yeniYil++; }
+      if (yeniAy > 12) {
+        yeniAy = 1;
+        yeniYil++;
+      }
     }
+    
     setSecilenAy(`${yeniYil}-${String(yeniAy).padStart(2, '0')}`);
   };
 
-  const getGunVerisi = (tarih: string): GunVerisi | null => {
-    return takvimVerisi[tarih] || null;
+  const excelAktar = () => {
+    if (puantajVerisi.length === 0) {
+      alert('Aktarilacak veri yok!');
+      return;
+    }
+    const ayAdi = new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase();
+
+    const basliklar = [
+      'SIRA', 'PERS. TC. NO', 'ADI SOYADI',
+      'İŞE GİRİŞ TARİHİ', 'İŞTEN AYRILIŞ TARİHİ', 'GÜNLÜK BRÜT ÜCRET',
+      `${ayAdi} AYI MESAİ SAATİ`, 'MESAI SAATİ', 'FAZLA MESAİ SÜRESİ',
+      'YOL YARDIMI', 'NET ŞOFÖRLÜK PARASI EKLENECEK', 'EKİP ŞEFİ'
+    ];
+
+    gunler.forEach((gun) => {
+      basliklar.push(`${gun.getDate()} Gun`);
+    });
+
+    basliklar.push('Ilm. Gun', 'IMZA');
+
+    const satirlar = puantajVerisi.map((satir) => {
+      const iseGirisTarihiStr = satir.iseGirisTarihi 
+        ? new Date(satir.iseGirisTarihi).toLocaleDateString('tr-TR')
+        : '';
+      
+      const row: (string | number)[] = [
+        satir.sira, satir.tcKimlik, satir.adSoyad,
+        iseGirisTarihiStr,
+        '', // İŞTEN AYRILIŞ TARİHİ
+        (satir.gunlukBrut) || '', // GÜNLÜK BRÜT ÜCRET
+        '', // {AY} AYI MESAİ SAATİ
+        '', // MESAI SAATİ
+        '', // FAZLA MESAİ SÜRESİ
+        (satir.yolYardimi) || '', // YOL YARDIMI
+        (satir.netSoforluk) || '', // NET ŞOFÖRLÜK PARASI EKLENECEK
+        '', // EKİP ŞEFİ
+      ];
+
+      gunler.forEach((gun) => {
+        const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+        const hucre = satir.hucreler[tarih];
+        row.push(hucre?.deger || '');
+      });
+
+      row.push('', '');
+      return row;
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet([basliklar, ...satirlar]);
+
+    // set reasonable column widths
+    const colWidths = basliklar.map((h, idx) => {
+      if (idx === 0) return { wch: 6 }; // SIRA
+      if (idx === 1) return { wch: 15 }; // TC
+      if (idx === 2) return { wch: 25 }; // ADI SOYADI
+      if (idx === 3 || idx === 4) return { wch: 14 }; // dates
+      if (idx === 5) return { wch: 14 }; // GUNLUK BRUT
+      if (idx === 6) return { wch: 18 }; // month mesai
+      if (idx === 7) return { wch: 12 }; // MESAI SAATI
+      if (idx === 8) return { wch: 16 }; // FAZLA
+      if (idx === 9) return { wch: 12 }; // YOL YARDIMI
+      if (idx === 10) return { wch: 14 }; // NET SOFORLUK
+      if (idx === 11) return { wch: 12 }; // EKIP SEFI
+      return { wch: 15 };
+    });
+    ws['!cols'] = colWidths;
+
+    // Apply number formatting for currency columns (GÜNLÜK BRÜT ÜCRET idx=5, YOL YARDIMI idx=9)
+    const moneyCols = [5, 9];
+    if (ws['!ref']) {
+      const range = XLSX.utils.decode_range(ws['!ref'] as string);
+      for (let R = range.s.r + 1; R <= range.e.r; ++R) { // start after header
+        moneyCols.forEach((c) => {
+          const cellAddress = { c, r: R };
+          const cellRef = XLSX.utils.encode_cell(cellAddress);
+          const cell = ws[cellRef];
+          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+            const num = Number(String(cell.v).replace(',', '.'));
+            if (!Number.isNaN(num)) {
+              cell.v = num;
+              cell.t = 'n';
+              cell.z = '#,##0.00';
+            }
+          }
+        });
+      }
+    }
+
+    // Add autofilter for header row
+    const lastCol = basliklar.length - 1;
+    const lastColLetter = XLSX.utils.encode_col(lastCol);
+    ws['!autofilter'] = { ref: `A1:${lastColLetter}1` };
+
+    // Attempt to style header row (best-effort)
+    try {
+      for (let C = 0; C <= lastCol; ++C) {
+        const hdrRef = XLSX.utils.encode_cell({ c: C, r: 0 });
+        const cell = ws[hdrRef];
+        if (!cell) continue;
+        // Apply header styling
+        (cell as { s?: unknown }).s = { fill: { fgColor: { rgb: 'FFD1D5DB' } }, font: { bold: true } };
+      }
+    } catch (error) {
+      console.error('Header styling error:', error);
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Puantaj');
+
+    const [yil, ay] = secilenAy.split('-');
+    const ayIsimleri = ['Ocak', 'Subat', 'Mart', 'Nisan', 'Mayis', 'Haziran', 'Temmuz', 'Agustos', 'Eylul', 'Ekim', 'Kasim', 'Aralik'];
+    const dosyaAdi = `${bolge?.BolgeAdi || 'Bolge'}_Puantaj_${ayIsimleri[parseInt(ay) - 1]}_${yil}.xlsx`;
+
+    XLSX.writeFile(wb, dosyaAdi);
   };
+
+  const hucreGuncelle = (satirIndex: number, tarih: string, deger: string) => {
+    // map symbol -> color according to legend
+    const symbolToColor = (val?: string) => {
+      if (!val) return undefined;
+      const s = val.toString().trim().toUpperCase();
+      // normalize Turkish Ü/YI etc
+      if (s === 'X' || s === '/') return undefined; // white / empty
+      if (s === 'Ü' || s === 'U') return '#facc15'; // ücretli izin - yellow
+      if (s === 'I') return '#ef4444'; // ücretsiz izin - red
+      if (s === 'YI' || s === 'Yİ' || s === 'Y') return '#3b82f6'; // yıllık izin - blue
+      if (s === 'T') return '#facc15'; // hafta tatili - yellow
+      if (s === 'RT') return '#facc15'; // resmi tatil - yellow
+      if (s === 'R') return '#10b981'; // rapor - green
+      if (s === 'M') return '#ef4444'; // tam gün fazla mesai - red
+      // default: no color
+      return undefined;
+    };
+
+    setPuantajVerisi((prev) => {
+      const yeni = [...prev];
+      if (!yeni[satirIndex]) return prev;
+      if (!yeni[satirIndex].hucreler[tarih]) {
+        yeni[satirIndex].hucreler[tarih] = { deger: '' };
+      }
+      const color = symbolToColor(deger);
+      yeni[satirIndex].hucreler[tarih].deger = deger;
+      if (color) yeni[satirIndex].hucreler[tarih].renk = color;
+      else delete yeni[satirIndex].hucreler[tarih].renk;
+      return yeni;
+    });
+  };
+
+  const updateInfoField = (satirIndex: number, field: keyof Pick<PuantajSatir, 'netSoforluk' | 'gunlukBrut' | 'yolYardimi'>, value: string) => {
+    setPuantajVerisi(prev => {
+      const yeni = [...prev];
+      if (!yeni[satirIndex]) return prev;
+      yeni[satirIndex] = { ...yeni[satirIndex], [field]: value };
+      return yeni;
+    });
+  };
+
+  if (loading) {
+    return (
+      <ProtectedRoute allowedRoles={['koordinator', 'insan_kaynaklari', 'yonetici']}>
+        <DashboardLayout>
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          </div>
+        </DashboardLayout>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute allowedRoles={['koordinator', 'insan_kaynaklari', 'yonetici']}>
       <DashboardLayout>
-        {loading ? (
-          <div className="flex items-center justify-center min-h-[calc(100vh-200px)]">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent"></div>
+        <div className="h-full flex flex-col puantaj-page">
+          {isDark && (
+            <style>{`.puantaj-page select { background-color: #2d2d2d; color: #ffffff; }
+              .puantaj-page select option { background-color: #2d2d2d; color: #ffffff; }
+              .puantaj-page select::-ms-expand { filter: invert(1); }
+            `}</style>
+          )}
+          <div className={`border-b p-3 ${isDark ? 'bg-[#2d2d2d]/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h1 className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>Donem Puantaj Listesi</h1>
+                <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>{bolge?.BolgeAdi || 'Bolge'} - Sirket: Ay-Ka Dogalgaz Enerji</p>
+                <p className={`text-xs ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>Sube Is Yeri Sicil No: {bolge?.BolgeSicilNo || '-'}</p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button onClick={() => ayDegistir('onceki')} className={`p-1.5 rounded-lg transition-all ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300'}`}>
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <div className={`px-4 py-2 rounded-lg flex items-center gap-2 min-w-[160px] justify-center ${isDark ? 'bg-gray-700 text-white' : 'bg-white text-gray-900 border border-gray-300'}`}>
+                  <CalendarIcon className="w-4 h-4" />
+                  <span className="text-sm font-semibold">{new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { year: 'numeric', month: 'long' })}</span>
+                </div>
+
+                <button onClick={() => ayDegistir('sonraki')} className={`p-1.5 rounded-lg transition-all ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300'}`}>
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <button onClick={excelAktar} className="ml-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-1.5 transition-all shadow-lg text-sm">
+                  <Download className="w-4 h-4" />
+                  Excel Aktar
+                </button>
+                <button onClick={() => { setPuantajYuklenmedi(false); yukleVeriler(); }} title="Puantaj Yenile" className="ml-2 p-2 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg text-gray-700">
+                  <RefreshCw className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Donem: {gunler[0]?.toLocaleDateString('tr-TR')} - {gunler[gunler.length - 1]?.toLocaleDateString('tr-TR')}</div>
           </div>
-        ) : (
-        <div className="space-y-6">
-          {/* Bölge Bilgisi */}
-          <div className={`flex items-center justify-between pb-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-            <div>
-              <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{bolgeAdi}</h2>
-              <p className={`text-sm ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Bölge Çalışma Takvimi</p>
+
+          {puantajYuklenmedi && (
+            <div className={`p-2 text-center ${isDark ? 'bg-yellow-800 text-white' : 'bg-yellow-100 text-yellow-800'}`}>
+              Puantaj verileri yüklenemedi lütfen <button onClick={() => { setPuantajYuklenmedi(false); yukleVeriler(); }} className="underline font-semibold">Puantaj Boyama Sayfasından </button> Aylık boyamayı kontrol ediniz .
+            </div>
+          )}
+
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div ref={tableContainerRef} className="flex-1 overflow-auto">
+              <table className={`w-full border-collapse text-[10px] ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                <thead className={`sticky top-0 z-10 ${isDark ? 'bg-[#1e1e1e]' : 'bg-gray-100'}`}>
+                  <tr>
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[35px] sticky left-0 z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>SIRA</th>
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[85px] sticky left-[35px] z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>TC NO</th>
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[120px] sticky left-[120px] z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>ADI SOYADI</th>
+            <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>İŞE GİRİŞ TARİHİ</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>İŞTEN AYRILIŞ TARİHİ</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>GÜNLÜK BRÜT ÜCRET</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[90px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>{/* Ay adı dinamik */} {new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase()} AYI MESAİ SAATİ</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>MESAI SAATİ</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[95px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>FAZLA MESAİ SÜRESİ</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[75px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>YOL YARDIMI</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[145px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>NET ŞOFÖRLÜK PARASI EKLENECEK</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[85px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>EKİP ŞEFİ</th>
+                    {gunler.map((gun) => {
+                      const gunAdi = gun.toLocaleDateString('tr-TR', { weekday: 'short' }).substring(0, 2).toUpperCase();
+                      const gunNo = gun.getDate();
+                      return (
+                        <th key={gun.toISOString()} className={`border px-0.5 py-0.5 font-semibold text-center w-[35px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>
+                          <div className="flex flex-col"><span className="text-[8px]">{gunAdi}</span><span className="text-xs font-bold">{gunNo}</span></div>
+                        </th>
+                      );
+                    })}
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[45px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>Ilm</th>
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[50px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>IMZA</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {puantajVerisi.map((satir, satirIndex) => (
+                    <tr key={satir.tcKimlik} className={isDark ? 'hover:bg-gray-800/30' : 'hover:bg-gray-50'}>
+                      <td className={`border px-0.5 py-0.5 text-center sticky left-0 z-10 ${isDark ? 'bg-[#2d2d2d] border-gray-700' : 'bg-white border-gray-300'}`}>{satir.sira}</td>
+                      <td className={`border px-0.5 py-0.5 text-center sticky left-[35px] z-10 ${isDark ? 'bg-[#2d2d2d] border-gray-700' : 'bg-white border-gray-300'}`}>{satir.tcKimlik}</td>
+                      <td className={`border px-0.5 py-0.5 text-left sticky left-[120px] z-10 ${isDark ? 'bg-[#2d2d2d] border-gray-700' : 'bg-white border-gray-300'}`}>{satir.adSoyad}</td>
+                      {(() => {
+                        const ayAdi = new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase();
+                        const infoHeaders = [
+                          'İŞE GİRİŞ TARİHİ',
+                          'İŞTEN AYRILIŞ TARİHİ',
+                          'GÜNLÜK BRÜT ÜCRET',
+                          `${ayAdi} AYI MESAİ SAATİ`,
+                          'MESAI SAATİ',
+                          'FAZLA MESAİ SÜRESİ',
+                          'YOL YARDIMI',
+                          'NET ŞOFÖRLÜK PARASI EKLENECEK',
+                          'EKİP ŞEFİ'
+                        ];
+
+                        return infoHeaders.map((h, i) => {
+                          if (i === 0) {
+                            const tarihStr = satir.iseGirisTarihi 
+                              ? new Date(satir.iseGirisTarihi).toLocaleDateString('tr-TR')
+                              : '';
+                            return (
+                              <td key={`info-${i}`} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>
+                                <input 
+                                  type="text" 
+                                  value={tarihStr}
+                                  readOnly
+                                  className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none ${isDark ? 'text-white' : 'text-gray-900'}`} 
+                                />
+                              </td>
+                            );
+                          }
+                          // render special select for NET ŞOFÖRLÜK PARASI EKLENECEK (index 7)
+                          if (i === 7) {
+                            const val = satir.netSoforluk || '';
+                            const compact = val === 'X' || val === '/';
+                              return (
+                                <td key={`info-${i}`} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} text-center`}>
+                                  <select value={val} onChange={(e) => updateInfoField(satirIndex, 'netSoforluk', e.target.value)} className={`px-0.5 py-0.5 text-[10px] ${isDark ? 'bg-[#2d2d2d] text-white' : 'bg-transparent text-gray-900'}`} style={{ width: compact ? 36 : '100%', margin: '0 auto', textAlign: 'center' }}>
+                                    <option value=""> </option>
+                                    <option value="X">X</option>
+                                    <option value="/">/</option>
+                                  </select>
+                                </td>
+                              );
+                          }
+
+                          // render numeric input for GÜNLÜK BRÜT ÜCRET (i===2) and YOL YARDIMI (i===6)
+                          if (i === 2) {
+                            const val = satir.gunlukBrut || '';
+                            return (
+                              <td key={`info-${i}`} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} text-center`}>
+                                <div className="flex items-center justify-center">
+                                  <input type="number" step="0.01" value={val} onChange={(e) => updateInfoField(satirIndex, 'gunlukBrut', e.target.value)} placeholder="0.00" className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                  <span className="text-[10px] ml-1">₺</span>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          if (i === 6) {
+                            const val = satir.yolYardimi || '';
+                            return (
+                              <td key={`info-${i}`} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} text-center`}>
+                                <div className="flex items-center justify-center">
+                                  <input type="number" step="0.01" value={val} onChange={(e) => updateInfoField(satirIndex, 'yolYardimi', e.target.value)} placeholder="0.00" className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                  <span className="text-[10px] ml-1">₺</span>
+                                </div>
+                              </td>
+                            );
+                          }
+
+                          return (
+                            <td key={`info-${i}`} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>
+                              <input type="text" placeholder={h} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                            </td>
+                          );
+                        });
+                      })()}
+                      {(() => {
+                        const hire = satir.iseGirisTarihi ? new Date(satir.iseGirisTarihi) : null;
+                        if (!hire) {
+                          return gunler.map((gun) => {
+                            const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+                            const hucre = satir.hucreler[tarih];
+                            return (
+                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                                <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                              </td>
+                            );
+                          });
+                        }
+
+                        const firstDay = gunler[0];
+                        const lastDay = gunler[gunler.length - 1];
+
+                        if (hire > lastDay) {
+                          const colspan = gunler.length;
+                          const display = new Date(hire).toLocaleDateString('tr-TR');
+                          return (
+                            <td key={`merged-before-${satir.tcKimlik}`} colSpan={colspan} className={`border px-0.5 py-0.5 text-center font-semibold ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: '#ef4444', color: '#fff' }}>
+                              {display}
+                            </td>
+                          );
+                        }
+
+                        if (hire <= firstDay) {
+                          return gunler.map((gun) => {
+                            const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+                            const hucre = satir.hucreler[tarih];
+                            return (
+                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                                <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                              </td>
+                            );
+                          });
+                        }
+
+                        const mergedCount = gunler.filter(g => g < hire).length;
+                        const remaining = gunler.slice(mergedCount);
+                        const display = new Date(hire).toLocaleDateString('tr-TR');
+
+                        return (
+                          <>
+                            {mergedCount > 0 && (
+                              <td key={`merged-before-${satir.tcKimlik}`} colSpan={mergedCount} className={`border px-0.5 py-0.5 text-center font-semibold ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: '#ef4444', color: '#fff' }}>
+                                {display}
+                              </td>
+                            )}
+                            {remaining.map((gun) => {
+                              const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+                              const hucre = satir.hucreler[tarih];
+                              return (
+                                <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                                  <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                </td>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                      <td className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`}><input type="text" className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} /></td>
+                      <td className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`}><input type="text" className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className={`border-t p-2 ${isDark ? 'bg-[#2d2d2d]/50 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
+              <div className="flex items-center justify-center gap-4 text-xs flex-wrap">
+                <div className="flex items-center gap-1"><div className={`w-4 h-4 flex items-center justify-center border ${isDark ? 'border-gray-600' : 'border-gray-300'} bg-white text-black font-bold`}>X</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>ÇALIŞILAN GÜN - X</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-yellow-400 text-black font-bold border border-gray-300">Ü</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>ÜCRETLİ İZİN - Ü</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-red-500 text-white font-bold">I</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>ÜCRETSİZ İZİN - I</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-blue-500 text-white font-bold">YI</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>YILLIK İZİN - YI</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-yellow-400 text-black font-bold border border-gray-300">T</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>HAFTA TATİLİ - T</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-yellow-400 text-black font-bold border border-gray-300">RT</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>RESMİ TATİL - RT</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-green-500 text-white font-bold">R</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>RAPOR - R</span></div>
+                <div className="flex items-center gap-1"><div className="w-4 h-4 flex items-center justify-center bg-red-500 text-white font-bold">M</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>TAM GÜN FAZLA MESAİ - M</span></div>
+                <div className="flex items-center gap-1"><div className={`w-4 h-4 flex items-center justify-center border ${isDark ? 'border-gray-600' : 'border-gray-300'} bg-white text-black font-bold`}>/</div><span className={isDark ? 'text-gray-300' : 'text-gray-700'}>YARIM GÜN FAZLA MESAİ - /</span></div>
+              </div>
             </div>
           </div>
-
-      {/* Şablonlar - Önizleme */}
-      <div className={`${isDark ? 'bg-gray-800' : 'bg-gray-50'} rounded-xl p-5 border ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className={`text-sm font-semibold ${isDark ? 'text-gray-200' : 'text-gray-700'}`}>Aktif Şablonlar</h3>
-          <button 
-            onClick={() => setSablonModalAcik(true)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-all ${isDark ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'} shadow-sm`}
-          >
-            Şablonları Düzenle
-          </button>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
-          {sablonlar.map(sablon => (
-            <div key={sablon.id} className={`${isDark ? 'bg-gray-700' : 'bg-white'} p-3 rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-200'} shadow-sm`}>
-              <div className="flex items-center gap-2 mb-1">
-                <div className="w-4 h-4 rounded" style={{ backgroundColor: sablon.renk }}></div>
-                <span className={`text-sm ${isDark ? 'text-white' : 'text-gray-900'} font-medium`}>{sablon.isim}</span>
-              </div>
-              {sablon.baslangic && (
-                <p className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{sablon.baslangic} - {sablon.bitis}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Ay Seçici */}
-      <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-xl p-6 border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-sm`}>
-        <div className="flex items-center justify-between mb-6">
-          <button onClick={() => ayDegistir('prev')} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
-            <ChevronLeft className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-700'}`} />
-          </button>
-          <div className="text-center">
-            <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              {new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { year: 'numeric', month: 'long' })}
-            </h2>
-            {aylikPuantaj && (
-              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium mt-2 ${
-                aylikPuantaj.Durum === 'kaydedildi' 
-                  ? isDark ? 'bg-green-900/50 text-green-300 border border-green-700' : 'bg-green-100 text-green-700 border border-green-200'
-                  : isDark ? 'bg-yellow-900/50 text-yellow-300 border border-yellow-700' : 'bg-yellow-100 text-yellow-700 border border-yellow-200'
-              }`}>
-                {aylikPuantaj.Durum === 'kaydedildi' ? '✓ Kaydedildi' : '⚠ Hazırlanıyor'}
-              </span>
-            )}
-          </div>
-          <button onClick={() => ayDegistir('next')} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
-            <ChevronRight className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-700'}`} />
-          </button>
-        </div>
-
-        {/* İstatistikler - Şablon adlarına göre */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
-          {sablonlar.map(sablon => {
-            // Kaydedilen günlerdeki şablon adlarını say
-            const kullanim = Object.values(takvimVerisi).filter(v => v.isim === sablon.isim).length;
-            return (
-              <div key={sablon.id} className={`${isDark ? 'bg-gray-700' : 'bg-gray-50'} p-3 rounded-lg border ${isDark ? 'border-gray-600' : 'border-gray-200'}`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-3 h-3 rounded-full" style={{ backgroundColor: sablon.renk }}></div>
-                  <span className={`text-xs ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{sablon.isim}</span>
-                </div>
-                <p className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{kullanim}</p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Takvim */}
-      {!aylikPuantaj ? (
-        <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-xl p-12 text-center border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-sm`}>
-          <Calendar className={`w-16 h-16 ${isDark ? 'text-gray-500' : 'text-gray-400'} mx-auto mb-4`} />
-          <h3 className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'} mb-2`}>Bu Ay Henüz Başlatılmamış</h3>
-          <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} mb-6`}>Aylık puantaj tutmaya başlamak için ayı başlatın.</p>
-          <button onClick={ayBaslat} className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition-all">
-            Ayı Başlat
-          </button>
-        </div>
-      ) : (
-        <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-xl p-6 border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-sm`}>
-          <div className="mb-4 flex items-center justify-between">
-            <h3 className={`text-lg font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Çalışma Takvimi - Günleri Boyayın
-              {aylikPuantaj.Durum === 'kaydedildi' && (
-                <span className={`text-sm ml-2 ${isDark ? 'text-green-400' : 'text-green-600'}`}>(Kaydedildi - Değiştirilebilir)</span>
-              )}
-            </h3>
-            <button onClick={ayiKaydet} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 shadow-sm flex items-center gap-2 transition-all">
-              <Save className="w-4 h-4" />
-              {aylikPuantaj.Durum === 'kaydedildi' ? 'Yeniden Kaydet' : 'Ayı Kaydet (JSON)'}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-7 gap-2 mb-2">
-            {['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'].map(gun => (
-              <div key={gun} className={`text-center font-semibold ${isDark ? 'text-gray-400' : 'text-gray-600'} py-2 text-sm`}>{gun}</div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-2">
-            {takvimGunleri().map((gun, idx) => {
-              const [, ay] = secilenAy.split('-').map(Number);
-              const buAyinGunu = gun.getMonth() === ay - 1;
-              const tarih = gun.toISOString().split('T')[0];
-              const gunVerisi = getGunVerisi(tarih);
-              
-              return (
-                <div
-                  key={idx}
-                  onClick={() => {
-                    if (buAyinGunu) {
-                      setSecilenGun(tarih);
-                      setSecimModalAcik(true);
-                    }
-                  }}
-                  className={`min-h-[100px] p-2 rounded-lg border transition-all ${
-                    buAyinGunu 
-                      ? `cursor-pointer hover:scale-105 hover:shadow-md ${isDark ? 'bg-gray-700' : 'bg-white'}` 
-                      : `opacity-30 ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`
-                  }`}
-                  style={{
-                    backgroundColor: gunVerisi && buAyinGunu ? gunVerisi.renk + (isDark ? '30' : '15') : undefined,
-                    borderColor: gunVerisi && buAyinGunu ? gunVerisi.renk : (isDark ? '#374151' : '#e5e7eb'),
-                    borderWidth: gunVerisi && buAyinGunu ? '2px' : '1px'
-                  }}
-                >
-                  <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-gray-900'} mb-1`}>{gun.getDate()}</div>
-                  {gunVerisi && buAyinGunu && (
-                    <div className="text-xs space-y-1">
-                      <div className={`font-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>{gunVerisi.isim}</div>
-                      {gunVerisi.baslangic && (
-                        <div className={isDark ? 'text-gray-300' : 'text-gray-600'}>{gunVerisi.baslangic}-{gunVerisi.bitis}</div>
-                      )}
-                      {gunVerisi.mola > 0 && (
-                        <div className={isDark ? 'text-gray-400' : 'text-gray-500'}>{gunVerisi.mola}dk</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Gün Seçim Modal */}
-      {secimModalAcik && secilenGun && (
-        <GunSecimModal
-          isOpen={secimModalAcik}
-          onClose={() => { setSecimModalAcik(false); setSecilenGun(null); }}
-          secilenGun={secilenGun}
-          sablonlar={sablonlar}
-          gunBoya={gunBoya}
-          isDark={isDark}
-        />
-      )}
-
-      {/* Şablon Düzenleme Modal */}
-      {sablonModalAcik && (
-        <SablonDuzenleModal
-          isOpen={sablonModalAcik}
-          onClose={() => setSablonModalAcik(false)}
-          sablonlar={sablonlar}
-          setSablonlar={setSablonlar}
-          sablonlariKaydet={sablonlariKaydet}
-          isDark={isDark}
-        />
-      )}
-        </div>
-        )}
       </DashboardLayout>
     </ProtectedRoute>
   );
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function GunSecimModal({ isOpen, onClose, secilenGun, sablonlar, gunBoya, isDark }: any) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  if (!isOpen || !mounted) return null;
-
-  const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
-      <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
-        onClick={onClose}
-      />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className={`${isDark ? 'bg-[#2d2d2d]' : 'bg-white'} rounded-2xl max-w-lg w-full border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-2xl`}>
-            <div className={`${isDark ? 'bg-gradient-to-b from-[#3d3d3d] to-[#2d2d2d] border-gray-700' : 'bg-gradient-to-b from-gray-100 to-gray-50 border-gray-200'} border-b px-6 py-4 flex items-center justify-between`}>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#FF5F57]"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-[#FFBD2E]"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-[#28C840]"></div>
-              </div>
-              <h3 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-gray-900'} absolute left-1/2 transform -translate-x-1/2`}>
-                {new Date(secilenGun).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'long' })}
-              </h3>
-              <button 
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6">
-              <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} mb-4 text-sm`}>Bu günü hangi şablonla boyamak istersiniz?</p>
-              <div className="space-y-2">
-                {sablonlar.map((sablon: Sablon) => (
-                  <button
-                    key={sablon.id}
-                    onClick={() => gunBoya(secilenGun, sablon)}
-                    className="w-full p-4 rounded-xl border-2 hover:scale-[1.02] transition-transform shadow-sm"
-                    style={{
-                      backgroundColor: sablon.renk + (isDark ? '20' : '10'),
-                      borderColor: sablon.renk
-                    }}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-6 h-6 rounded-lg shadow-sm" style={{ backgroundColor: sablon.renk }}></div>
-                        <div className="text-left">
-                          <div className={`font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>{sablon.isim}</div>
-                          {sablon.baslangic && (
-                            <div className={`text-sm ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                              {sablon.baslangic} - {sablon.bitis} ({sablon.mola}dk mola)
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return createPortal(modalContent, document.body);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function SablonDuzenleModal({ isOpen, onClose, sablonlar, setSablonlar, sablonlariKaydet, isDark }: any) {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    return () => setMounted(false);
-  }, []);
-
-  if (!isOpen || !mounted) return null;
-
-  const modalContent = (
-    <div className="fixed inset-0 z-[9999]" style={{ bottom: '60px' }}>
-      <div 
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm" 
-        style={{ bottom: '60px' }}
-        onClick={onClose}
-      />
-      <div style={{ position: 'fixed', top: 0, left: 0, bottom: '60px', width: '100%', zIndex: 10000, overflowY: 'auto' }}>
-        <div className="min-h-full p-4 sm:p-8 flex items-center justify-center">
-          <div className={`${isDark ? 'bg-[#2d2d2d]' : 'bg-white'} rounded-2xl max-w-4xl w-full border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-2xl`}>
-            <div className={`${isDark ? 'bg-gradient-to-b from-[#3d3d3d] to-[#2d2d2d] border-gray-700' : 'bg-gradient-to-b from-gray-100 to-gray-50 border-gray-200'} border-b px-6 py-4 flex items-center justify-between`}>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-[#FF5F57]"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-[#FFBD2E]"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-[#28C840]"></div>
-              </div>
-              <h3 className={`text-base font-semibold ${isDark ? 'text-white' : 'text-gray-900'} absolute left-1/2 transform -translate-x-1/2`}>6 Şablon Düzenle</h3>
-              <button 
-                onClick={onClose}
-                className="w-12 h-10 flex items-center justify-center hover:bg-red-600 hover:text-white transition-colors rounded"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6 space-y-4">
-              {sablonlar.map((sablon: Sablon, idx: number) => (
-                <div key={sablon.id} className={`p-4 ${isDark ? 'bg-gray-800' : 'bg-gray-50'} rounded-xl border ${isDark ? 'border-gray-700' : 'border-gray-200'} space-y-3`}>
-                  <div className={`font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Şablon {sablon.id}</div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className={`block text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1 font-medium`}>Şablon Adı</label>
-                      <input
-                        type="text"
-                        value={sablon.isim}
-                        onChange={(e) => {
-                          const yeni = [...sablonlar];
-                          yeni[idx].isim = e.target.value;
-                          setSablonlar(yeni);
-                        }}
-                        className={`w-full px-3 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                        placeholder="Örn: Toplantı Günü"
-                      />
-                    </div>
-                    <div>
-                      <label className={`block text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1 font-medium`}>Renk</label>
-                      <input
-                        type="color"
-                        value={sablon.renk}
-                        onChange={(e) => {
-                          const yeni = [...sablonlar];
-                          yeni[idx].renk = e.target.value;
-                          setSablonlar(yeni);
-                        }}
-                        className={`w-full h-10 rounded-lg cursor-pointer border ${isDark ? 'border-gray-600' : 'border-gray-300'}`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className={`block text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1 font-medium`}>Başlangıç (opsiyonel)</label>
-                      <input
-                        type="time"
-                        value={sablon.baslangic || ''}
-                        onChange={(e) => {
-                          const yeni = [...sablonlar];
-                          yeni[idx].baslangic = e.target.value || null;
-                          setSablonlar(yeni);
-                        }}
-                        className={`w-full px-3 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                      />
-                    </div>
-                    <div>
-                      <label className={`block text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1 font-medium`}>Bitiş (opsiyonel)</label>
-                      <input
-                        type="time"
-                        value={sablon.bitis || ''}
-                        onChange={(e) => {
-                          const yeni = [...sablonlar];
-                          yeni[idx].bitis = e.target.value || null;
-                          setSablonlar(yeni);
-                        }}
-                        className={`w-full px-3 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                      />
-                    </div>
-                    <div>
-                      <label className={`block text-xs ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-1 font-medium`}>Mola (dk)</label>
-                      <input
-                        type="number"
-                        value={sablon.mola}
-                        onChange={(e) => {
-                          const yeni = [...sablonlar];
-                          yeni[idx].mola = Number(e.target.value);
-                          setSablonlar(yeni);
-                        }}
-                        className={`w-full px-3 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'} border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent`}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              <div className={`flex justify-end gap-3 pt-4 border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-                <button onClick={onClose} className={`px-6 py-2 ${isDark ? 'bg-gray-700 border-gray-600 text-gray-200 hover:bg-gray-600' : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'} border rounded-lg transition-colors`}>
-                  İptal
-                </button>
-                <button onClick={sablonlariKaydet} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-md transition-all">
-                  Şablonları Güncelle
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  return createPortal(modalContent, document.body);
 }
