@@ -6,8 +6,10 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { createClient } from '@/lib/supabase/client';
-import { Download, ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, Calendar as CalendarIcon, RefreshCw, FileText, Save, Database } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +58,22 @@ export default function PuantajPage() {
   
   const [gunler, setGunler] = useState<Date[]>([]);
   const [puantajYuklenmedi, setPuantajYuklenmedi] = useState(false);
+  const [manuelDegisiklikler, setManuelDegisiklikler] = useState<Record<number, Record<string, {
+    HucreDeger?: string;
+    NetSoforluk?: string;
+    GunlukBrut?: string;
+    YolYardimi?: string;
+  }>>>({});
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  const [kaydedilecekDegisiklikler, setKaydedilecekDegisiklikler] = useState<Array<{
+    PersonelTcKimlik: number;
+    Tarih: string;
+    HucreDeger?: string | null;
+    NetSoforluk?: string;
+    GunlukBrut?: string;
+    YolYardimi?: string;
+    silme?: boolean;
+  }>>([]);
   
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
@@ -276,7 +294,159 @@ export default function PuantajPage() {
     }
   }, [user, yukleVeriler]);
 
+  // Manuel değişiklikleri veritabanından çek
+  const degisiklikleriCek = async () => {
+    if (!user?.BolgeID) return;
+    
+    setKaydediliyor(true);
+    try {
+      const response = await fetch(`/api/puantaj-degisiklik?bolgeId=${user.BolgeID}&yilAy=${secilenAy}`);
+      if (response.ok) {
+        const { degisiklikler } = await response.json();
+        setManuelDegisiklikler(degisiklikler || {});
+        
+        // Manuel değişiklikleri satırlara uygula
+        if (degisiklikler) {
+          setPuantajVerisi(prev => prev.map(satir => {
+            const personelDegisiklikleri = degisiklikler[satir.tcKimlik];
+            if (personelDegisiklikleri) {
+              const yeniHucreler = { ...satir.hucreler };
+              
+              // map symbol -> color according to legend (sadece UI için)
+              const symbolToColor = (val?: string) => {
+                if (!val) return undefined;
+                const s = val.toString().trim().toUpperCase();
+                if (s === 'X' || s === '/') return undefined;
+                if (s === 'Ü' || s === 'U') return '#facc15';
+                if (s === 'I') return '#ef4444';
+                if (s === 'YI' || s === 'Yİ' || s === 'Y') return '#3b82f6';
+                if (s === 'T') return '#facc15';
+                if (s === 'RT') return '#facc15';
+                if (s === 'R') return '#10b981';
+                if (s === 'M') return '#ef4444';
+                return undefined;
+              };
+              
+              Object.entries(personelDegisiklikleri).forEach(([tarih, deg]) => {
+                const degisiklik = deg as {
+                  HucreDeger?: string;
+                  NetSoforluk?: string;
+                  GunlukBrut?: string;
+                  YolYardimi?: string;
+                };
+                if (degisiklik.HucreDeger !== undefined) {
+                  const color = symbolToColor(degisiklik.HucreDeger);
+                  yeniHucreler[tarih] = {
+                    deger: degisiklik.HucreDeger || '',
+                    renk: color
+                  };
+                }
+              });
+              const ilkDegisiklik = Object.values(personelDegisiklikleri)[0] as {
+                NetSoforluk?: string;
+                GunlukBrut?: string;
+                YolYardimi?: string;
+              } | undefined;
+              return {
+                ...satir,
+                hucreler: yeniHucreler,
+                netSoforluk: ilkDegisiklik?.NetSoforluk || satir.netSoforluk,
+                gunlukBrut: ilkDegisiklik?.GunlukBrut || satir.gunlukBrut,
+                yolYardimi: ilkDegisiklik?.YolYardimi || satir.yolYardimi
+              };
+            }
+            return satir;
+          }));
+          alert(`✅ ${Object.keys(degisiklikler).length} personel için değişiklikler yüklendi!`);
+        } else {
+          alert('ℹ️ Bu ay için kaydedilmiş değişiklik bulunamadı.');
+        }
+      }
+    } catch (error) {
+      console.error('Manuel değişiklik yükleme hatası:', error);
+      alert('❌ Değişiklikler yüklenirken hata oluştu!');
+    }
+    setKaydediliyor(false);
+  };
+
+  // Manuel değişiklikleri veritabanına kaydet
+  const degisiklikleriKaydet = async () => {
+    if (!user?.BolgeID || kaydedilecekDegisiklikler.length === 0) {
+      alert('Kaydedilecek değişiklik yok!');
+      return;
+    }
+
+    setKaydediliyor(true);
+    try {
+      let basariliSayisi = 0;
+      let hataliSayisi = 0;
+
+      for (const degisiklik of kaydedilecekDegisiklikler) {
+        try {
+          // Eğer silme işareti varsa veya değer boşsa, DELETE isteği gönder
+          if (degisiklik.silme || degisiklik.HucreDeger === null) {
+            const response = await fetch(
+              `/api/puantaj-degisiklik?bolgeId=${user.BolgeID}&personelTc=${degisiklik.PersonelTcKimlik}&yilAy=${secilenAy}&tarih=${degisiklik.Tarih}`,
+              { method: 'DELETE' }
+            );
+            
+            if (response.ok) {
+              basariliSayisi++;
+            } else {
+              hataliSayisi++;
+            }
+          } else {
+            // Normal kaydetme işlemi
+            const response = await fetch('/api/puantaj-degisiklik', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                BolgeID: user.BolgeID,
+                PersonelTcKimlik: degisiklik.PersonelTcKimlik,
+                YilAy: secilenAy,
+                Tarih: degisiklik.Tarih,
+                HucreDeger: degisiklik.HucreDeger,
+                NetSoforluk: degisiklik.NetSoforluk || null,
+                GunlukBrut: degisiklik.GunlukBrut || null,
+                YolYardimi: degisiklik.YolYardimi || null,
+                DegistirenKisi: user.PersonelEmail || String(user.PersonelTcKimlik)
+              })
+            });
+
+            if (response.ok) {
+              basariliSayisi++;
+            } else {
+              hataliSayisi++;
+            }
+          }
+        } catch (error) {
+          console.error('Değişiklik kaydetme hatası:', error);
+          hataliSayisi++;
+        }
+      }
+
+      if (hataliSayisi === 0) {
+        alert(`✅ ${basariliSayisi} değişiklik başarıyla kaydedildi!`);
+        setKaydedilecekDegisiklikler([]); // Listeyi temizle
+      } else {
+        alert(`⚠️ ${basariliSayisi} değişiklik kaydedildi, ${hataliSayisi} değişiklikte hata oluştu!`);
+      }
+    } catch (error) {
+      console.error('Toplu kaydetme hatası:', error);
+      alert('❌ Değişiklikler kaydedilirken hata oluştu!');
+    }
+    setKaydediliyor(false);
+  };
+
   const ayDegistir = (yon: 'onceki' | 'sonraki') => {
+    // Eğer kaydedilmemiş değişiklikler varsa uyar
+    if (kaydedilecekDegisiklikler.length > 0) {
+      const onay = confirm(
+        `⚠️ ${kaydedilecekDegisiklikler.length} kaydedilmemiş değişiklik var!\n\nAy değiştirilirse bu değişiklikler kaybolacak. Devam etmek istiyor musunuz?`
+      );
+      if (!onay) return;
+    }
+
     const [yil, ay] = secilenAy.split('-').map(Number);
     let yeniYil = yil;
     let yeniAy = ay;
@@ -296,6 +466,8 @@ export default function PuantajPage() {
     }
     
     setSecilenAy(`${yeniYil}-${String(yeniAy).padStart(2, '0')}`);
+    setKaydedilecekDegisiklikler([]); // Bekleyen değişiklikleri temizle
+    setManuelDegisiklikler({}); // Manuel değişiklikleri temizle
   };
 
   const excelAktar = () => {
@@ -305,15 +477,20 @@ export default function PuantajPage() {
     }
     const ayAdi = new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase();
 
+    // Başlık bilgileri için 3 satır
+    const sirketBilgi1 = ['SAMSUN - Sirket: Ay-Ka Dogalgaz Enerji'];
+    const sirketBilgi2 = [`Sube Is Yeri Sicil No: ${bolge?.BolgeSicilNo || '482990101116728805516-96/000'}`];
+    const bosSatir = [''];
+
     const basliklar = [
       'SIRA', 'PERS. TC. NO', 'ADI SOYADI',
       'İŞE GİRİŞ TARİHİ', 'İŞTEN AYRILIŞ TARİHİ', 'GÜNLÜK BRÜT ÜCRET',
       `${ayAdi} AYI MESAİ SAATİ`, 'MESAI SAATİ', 'FAZLA MESAİ SÜRESİ',
-      'YOL YARDIMI', 'NET ŞOFÖRLÜK PARASI EKLENECEK', 'EKİP ŞEFİ'
+      'YOL YARDIMI', 'NET ŞOFÖRLÜK', 'EKİP ŞEFİ'
     ];
 
     gunler.forEach((gun) => {
-      basliklar.push(`${gun.getDate()} Gun`);
+      basliklar.push(`${gun.getDate()}`);
     });
 
     basliklar.push('Ilm. Gun', 'IMZA');
@@ -346,30 +523,32 @@ export default function PuantajPage() {
       return row;
     });
 
-    const ws = XLSX.utils.aoa_to_sheet([basliklar, ...satirlar]);
+    // Başlık satırları + tablo
+    const ws = XLSX.utils.aoa_to_sheet([sirketBilgi1, sirketBilgi2, bosSatir, basliklar, ...satirlar]);
 
-    // set reasonable column widths
+    // Sütun genişlikleri
     const colWidths = basliklar.map((h, idx) => {
       if (idx === 0) return { wch: 6 }; // SIRA
       if (idx === 1) return { wch: 15 }; // TC
       if (idx === 2) return { wch: 25 }; // ADI SOYADI
       if (idx === 3 || idx === 4) return { wch: 14 }; // dates
-      if (idx === 5) return { wch: 14 }; // GUNLUK BRUT
-      if (idx === 6) return { wch: 18 }; // month mesai
+      if (idx === 5) return { wch: 16 }; // GUNLUK BRUT
+      if (idx === 6) return { wch: 20 }; // month mesai
       if (idx === 7) return { wch: 12 }; // MESAI SAATI
       if (idx === 8) return { wch: 16 }; // FAZLA
       if (idx === 9) return { wch: 12 }; // YOL YARDIMI
       if (idx === 10) return { wch: 14 }; // NET SOFORLUK
       if (idx === 11) return { wch: 12 }; // EKIP SEFI
-      return { wch: 15 };
+      if (idx >= 12 && idx < basliklar.length - 2) return { wch: 4 }; // Günler
+      return { wch: 10 };
     });
     ws['!cols'] = colWidths;
 
-    // Apply number formatting for currency columns (GÜNLÜK BRÜT ÜCRET idx=5, YOL YARDIMI idx=9)
+    // Para formatı uygula
     const moneyCols = [5, 9];
     if (ws['!ref']) {
       const range = XLSX.utils.decode_range(ws['!ref'] as string);
-      for (let R = range.s.r + 1; R <= range.e.r; ++R) { // start after header
+      for (let R = 4; R <= range.e.r; ++R) { // 4. satırdan başla (0-indexed, başlıklar 3. satırda)
         moneyCols.forEach((c) => {
           const cellAddress = { c, r: R };
           const cellRef = XLSX.utils.encode_cell(cellAddress);
@@ -379,29 +558,124 @@ export default function PuantajPage() {
             if (!Number.isNaN(num)) {
               cell.v = num;
               cell.t = 'n';
-              cell.z = '#,##0.00';
+              cell.z = '#,##0.00 "₺"';
             }
           }
         });
       }
     }
 
-    // Add autofilter for header row
-    const lastCol = basliklar.length - 1;
-    const lastColLetter = XLSX.utils.encode_col(lastCol);
-    ws['!autofilter'] = { ref: `A1:${lastColLetter}1` };
+    // Stil ve kenarlık uygulamaları
+    if (ws['!ref']) {
+      const range = XLSX.utils.decode_range(ws['!ref'] as string);
+      const lastCol = basliklar.length - 1;
+      
+      // Tüm hücrelere border ekle
+      const thinBorder = {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } }
+      };
 
-    // Attempt to style header row (best-effort)
-    try {
+      // Başlık bilgisi satırları (ilk 2 satır) - stil
       for (let C = 0; C <= lastCol; ++C) {
-        const hdrRef = XLSX.utils.encode_cell({ c: C, r: 0 });
-        const cell = ws[hdrRef];
-        if (!cell) continue;
-        // Apply header styling
-        (cell as { s?: unknown }).s = { fill: { fgColor: { rgb: 'FFD1D5DB' } }, font: { bold: true } };
+        // İlk satır - Şirket bilgisi
+        const cell1Ref = XLSX.utils.encode_cell({ c: C, r: 0 });
+        if (!ws[cell1Ref]) ws[cell1Ref] = { t: 's', v: '' };
+        ws[cell1Ref].s = {
+          font: { bold: true, sz: 12, color: { rgb: '000000' } },
+          alignment: { horizontal: 'left', vertical: 'center' },
+          fill: { fgColor: { rgb: 'E8F4F8' } }
+        };
+        
+        // İkinci satır - Sicil no bilgisi
+        const cell2Ref = XLSX.utils.encode_cell({ c: C, r: 1 });
+        if (!ws[cell2Ref]) ws[cell2Ref] = { t: 's', v: '' };
+        ws[cell2Ref].s = {
+          font: { sz: 11, color: { rgb: '000000' } },
+          alignment: { horizontal: 'left', vertical: 'center' },
+          fill: { fgColor: { rgb: 'E8F4F8' } }
+        };
       }
-    } catch (error) {
-      console.error('Header styling error:', error);
+
+      // Başlık bilgilerini merge et
+      ws['!merges'] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }, // İlk satır merge
+        { s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } }  // İkinci satır merge
+      ];
+
+      // Tablo başlık satırı (4. satır, index 3)
+      for (let C = 0; C <= lastCol; ++C) {
+        const hdrRef = XLSX.utils.encode_cell({ c: C, r: 3 });
+        if (!ws[hdrRef]) ws[hdrRef] = { t: 's', v: '' };
+        ws[hdrRef].s = {
+          font: { bold: true, sz: 10, color: { rgb: 'FFFFFF' } },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+          fill: { fgColor: { rgb: '4472C4' } },
+          border: thinBorder
+        };
+      }
+
+      // Veri satırları - stil ve renkler
+      for (let R = 4; R <= range.e.r; ++R) {
+        const satirIndex = R - 4; // satirlar array index
+        const satirData = puantajVerisi[satirIndex];
+        
+        for (let C = 0; C <= lastCol; ++C) {
+          const cellRef = XLSX.utils.encode_cell({ c: C, r: R });
+          if (!ws[cellRef]) ws[cellRef] = { t: 's', v: '' };
+          
+          // Temel stil
+          const cellStyle: Record<string, unknown> = {
+            alignment: { horizontal: 'center', vertical: 'center' },
+            border: thinBorder,
+            font: { sz: 10 }
+          };
+
+          // Gün hücrelerinin renkleri (12. sütundan başlayarak günler)
+          if (C >= 12 && C < basliklar.length - 2 && satirData) {
+            const gunIndex = C - 12;
+            const gun = gunler[gunIndex];
+            if (gun) {
+              const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+              const hucre = satirData.hucreler[tarih];
+              
+              if (hucre?.renk) {
+                // Hex rengi RGB'ye çevir
+                const hexToRgb = (hex: string) => hex.replace('#', '').toUpperCase();
+                const rgbColor = hexToRgb(hucre.renk);
+                
+                // Renk mapping - daha parlak renkler
+                const colorMap: Record<string, string> = {
+                  'FACC15': 'FFEB3B', // Sarı - daha parlak
+                  'EF4444': 'FF6B6B', // Kırmızı - daha parlak
+                  '3B82F6': '64B5F6', // Mavi - daha parlak
+                  '10B981': '4CAF50'  // Yeşil - daha parlak
+                };
+                
+                cellStyle.fill = { fgColor: { rgb: colorMap[rgbColor] || rgbColor } };
+                cellStyle.font = { sz: 10, bold: true, color: { rgb: '000000' } };
+              }
+            }
+          }
+
+          // Sütun adı ve TC kimlik sütunları için
+          if (C === 2) { // Adı Soyadı
+            cellStyle.alignment = { horizontal: 'left', vertical: 'center' };
+          }
+
+          ws[cellRef].s = cellStyle;
+        }
+      }
+
+      // Satır yükseklikleri
+      ws['!rows'] = [
+        { hpt: 20 }, // 1. satır (şirket bilgisi)
+        { hpt: 20 }, // 2. satır (sicil no)
+        { hpt: 15 }, // 3. satır (boş)
+        { hpt: 30 }  // 4. satır (başlıklar)
+      ];
     }
 
     const wb = XLSX.utils.book_new();
@@ -412,6 +686,243 @@ export default function PuantajPage() {
     const dosyaAdi = `${bolge?.BolgeAdi || 'Bolge'}_Puantaj_${ayIsimleri[parseInt(ay) - 1]}_${yil}.xlsx`;
 
     XLSX.writeFile(wb, dosyaAdi);
+  };
+
+  const pdfAktar = () => {
+    if (puantajVerisi.length === 0) {
+      alert('Aktarilacak veri yok!');
+      return;
+    }
+
+    const ayAdi = new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase();
+    
+    // Yatay A4 için PDF oluştur
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    // Türkçe karakterler için özel çözüm (İ, Ş, Ğ sorun oluyor)
+    const fixTurkce = (text: string): string => {
+      // Sorunlu karakterleri düzelt: İ, ı, Ş, ş, Ğ, ğ
+      return text
+        .replace(/İ/g, 'I')
+        .replace(/ı/g, 'i')
+        .replace(/Ş/g, 'S')
+        .replace(/ş/g, 's')
+        .replace(/Ğ/g, 'G')
+        .replace(/ğ/g, 'g');
+    };
+
+    // Başlık bilgileri
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text(fixTurkce('SAMSUN - Şirket: Ay-Ka Doğalgaz Enerji'), 10, 10);
+    
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.text(fixTurkce(`Şube İş Yeri Sicil No: ${bolge?.BolgeSicilNo || '482990101116728805516-96/000'}`), 10, 15);
+
+    // Tablo başlıkları - tek satır olanlar büyük, çift satır olanlar küçük
+    const basliklar = [
+      'SIRA',
+      'TC NO', 
+      'ADI SOYADI', 
+      fixTurkce('İŞE GİRİŞ'), 
+      fixTurkce('İŞTEN ÇIKIŞ'),
+      fixTurkce('GÜNLÜK ÜCRET'),
+      fixTurkce(`${ayAdi} MESAİ`),
+      fixTurkce('MESAİ SAAT'),
+      fixTurkce('FAZLA MESAİ'),
+      fixTurkce('YOL YRD.'),
+      fixTurkce('NET ŞÖF.'),
+      fixTurkce('EKİP ŞEFİ')
+    ];
+
+    // Gün başlıklarını ekle
+    gunler.forEach((gun) => {
+      basliklar.push(`${gun.getDate()}`);
+    });
+
+    basliklar.push('Ilm.', 'IMZA');
+
+    // Tablo verileri
+    const satirlar = puantajVerisi.map((satir) => {
+      const iseGirisTarihiStr = satir.iseGirisTarihi 
+        ? new Date(satir.iseGirisTarihi).toLocaleDateString('tr-TR')
+        : '';
+      
+      const row: (string | number)[] = [
+        satir.sira,
+        satir.tcKimlik,
+        fixTurkce(satir.adSoyad),
+        iseGirisTarihiStr,
+        '',
+        fixTurkce(String((satir.gunlukBrut) || '')),
+        '',
+        '',
+        '',
+        fixTurkce(String((satir.yolYardimi) || '')),
+        fixTurkce(String((satir.netSoforluk) || '')),
+        ''
+      ];
+
+      // Gün verilerini ekle
+      gunler.forEach((gun) => {
+        const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+        const hucre = satir.hucreler[tarih];
+        row.push(fixTurkce(String(hucre?.deger || '')));
+      });
+
+      row.push('', '');
+      return row;
+    });
+
+    // Renk mapping fonksiyonu
+    const getRenkKodu = (renk?: string): [number, number, number] | null => {
+      if (!renk) return null;
+      const hexToRgb = (hex: string): [number, number, number] => {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return [r, g, b];
+      };
+      
+      const colorMap: Record<string, string> = {
+        '#facc15': '#FFEB3B', // Sarı
+        '#ef4444': '#FF6B6B', // Kırmızı
+        '#3b82f6': '#64B5F6', // Mavi
+        '#10b981': '#4CAF50'  // Yeşil
+      };
+      
+      return hexToRgb(colorMap[renk.toLowerCase()] || renk);
+    };
+
+    // A4 Landscape: 297mm genişlik
+    // Marjlar: Sol 10mm + Sağ 10mm = 20mm
+    // Kullanılabilir alan: 277mm
+    
+    // Gün sayısı hesapla
+    const gunSayisi = gunler.length;
+    
+    // Büyük sabit sütunlar (tek satır başlık)
+    const buyukSutunlar = 6 + 18 + 35 + 14 + 14; // SIRA + TC NO + ADI SOYADI + İŞE GİRİŞ + İŞTEN ÇIKIŞ = 87mm
+    
+    // Küçük sütunlar (küçülebilir)
+    const kucukSutunlar = 8 + 10 + 7 + 8 + 7 + 7 + 8; // 55mm
+    
+    // Son sütunlar
+    const sonSutunlar = 7 + 9; // 16mm
+    
+    // Günler için kalan alan
+    const gunlerIcinAlan = 277 - buyukSutunlar - kucukSutunlar - sonSutunlar; // ~119mm
+    const gunCellWidth = gunlerIcinAlan / gunSayisi; // ~3.8mm per gün (31 gün için)
+    
+    // autoTable ile tablo oluştur
+    autoTable(doc, {
+      head: [basliklar],
+      body: satirlar,
+      startY: 19,
+      theme: 'grid',
+      tableWidth: 277, // Tam genişlik
+      styles: {
+        fontSize: 7,
+        cellPadding: 1,
+        lineColor: [0, 0, 0],
+        lineWidth: 0.1,
+        halign: 'center',
+        valign: 'middle',
+        overflow: 'linebreak'
+      },
+      headStyles: {
+        fillColor: [68, 114, 196],
+        textColor: [255, 255, 255],
+        fontSize: 6.5,
+        fontStyle: 'bold',
+        halign: 'center',
+        cellPadding: 1.2,
+        minCellHeight: 7, // Tek satır için yeterli
+        valign: 'middle'
+      },
+      columnStyles: {
+        0: { cellWidth: 6, fontSize: 7 }, // SIRA - büyük
+        1: { cellWidth: 18, fontSize: 7 }, // TC NO - büyük, tek satır
+        2: { cellWidth: 35, halign: 'left', fontSize: 6.5 }, // ADI SOYADI - büyük, tek satır
+        3: { cellWidth: 14, fontSize: 6.5 }, // İŞE GİRİŞ - büyük, tek satır
+        4: { cellWidth: 14, fontSize: 6.5 }, // İŞTEN ÇIKIŞ - büyük, tek satır
+        5: { cellWidth: 8, fontSize: 5.5 }, // GÜNLÜK ÜCRET - küçük
+        6: { cellWidth: 10, fontSize: 5.5 }, // AY MESAİ - küçük
+        7: { cellWidth: 7, fontSize: 5.5 }, // MESAİ SAAT - küçük
+        8: { cellWidth: 8, fontSize: 5.5 }, // FAZLA MESAİ - küçük
+        9: { cellWidth: 7, fontSize: 5.5 }, // YOL YARD - küçük
+        10: { cellWidth: 7, fontSize: 5.5 }, // NET ŞÖF - küçük
+        11: { cellWidth: 8, fontSize: 5.5 }  // EKİP ŞEFİ - küçük
+      },
+      didParseCell: function(data) {
+        // Başlık satırı için özel ayarlar
+        if (data.section === 'head') {
+          // Büyük sütunlar (0-4) için tek satır ve büyük font
+          if (data.column.index >= 0 && data.column.index <= 4) {
+            data.cell.styles.fontSize = 7;
+            data.cell.styles.minCellHeight = 7;
+          }
+          // Küçük sütunlar (5-11) için küçük font
+          else if (data.column.index >= 5 && data.column.index <= 11) {
+            data.cell.styles.fontSize = 5.5;
+            data.cell.styles.minCellHeight = 10; // 2 satır için
+          }
+        }
+        
+        // Gün sütunları için
+        if (data.column.index >= 12 && data.column.index < basliklar.length - 2) {
+          data.cell.styles.cellWidth = gunCellWidth;
+          data.cell.styles.fontSize = 7;
+        }
+        
+        // Son 2 sütun için (İlm ve İmza)
+        if (data.column.index === basliklar.length - 2) {
+          data.cell.styles.cellWidth = 7;
+          data.cell.styles.fontSize = 6;
+        }
+        if (data.column.index === basliklar.length - 1) {
+          data.cell.styles.cellWidth = 9;
+          data.cell.styles.fontSize = 6;
+        }
+        
+        // Gün hücrelerine renk ekle (12. sütundan başlayarak günler)
+        if (data.section === 'body' && data.column.index >= 12 && data.column.index < basliklar.length - 2) {
+          const satirIndex = data.row.index;
+          const satirData = puantajVerisi[satirIndex];
+          
+          if (satirData) {
+            const gunIndex = data.column.index - 12;
+            const gun = gunler[gunIndex];
+            
+            if (gun) {
+              const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
+              const hucre = satirData.hucreler[tarih];
+              
+              if (hucre?.renk) {
+                const rgb = getRenkKodu(hucre.renk);
+                if (rgb) {
+                  data.cell.styles.fillColor = rgb;
+                  data.cell.styles.fontStyle = 'bold';
+                  data.cell.styles.textColor = [0, 0, 0];
+                }
+              }
+            }
+          }
+        }
+      },
+      margin: { top: 19, right: 10, bottom: 10, left: 10 }
+    });
+
+    const [yil, ay] = secilenAy.split('-');
+    const ayIsimleri = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const dosyaAdi = `${fixTurkce(bolge?.BolgeAdi || 'Bolge')}_Puantaj_${fixTurkce(ayIsimleri[parseInt(ay) - 1])}_${yil}.pdf`;
+
+    doc.save(dosyaAdi);
   };
 
   const hucreGuncelle = (satirIndex: number, tarih: string, deger: string) => {
@@ -432,6 +943,9 @@ export default function PuantajPage() {
       return undefined;
     };
 
+    const satir = puantajVerisi[satirIndex];
+    if (!satir) return;
+
     setPuantajVerisi((prev) => {
       const yeni = [...prev];
       if (!yeni[satirIndex]) return prev;
@@ -444,14 +958,84 @@ export default function PuantajPage() {
       else delete yeni[satirIndex].hucreler[tarih].renk;
       return yeni;
     });
+    
+    // Eğer değer boşsa, kaydedilecekler listesinden kaldır (silinecek demektir)
+    const degerTemiz = deger?.trim();
+    
+    setKaydedilecekDegisiklikler((prev) => {
+      // Önce aynı hücreyi listeden çıkar
+      const filtered = prev.filter(
+        (d) => !(d.PersonelTcKimlik === satir.tcKimlik && d.Tarih === tarih)
+      );
+      
+      // Eğer değer tamamen boşsa, veritabanından silinmeli
+      if (!degerTemiz || degerTemiz === '') {
+        // Boş değer için "sil" işareti olarak özel bir işaret ekle
+        return [
+          ...filtered,
+          {
+            PersonelTcKimlik: satir.tcKimlik,
+            Tarih: tarih,
+            HucreDeger: null, // null = sil işareti
+            silme: true // silme bayrağı
+          } as never
+        ];
+      }
+      
+      // Değer varsa (X ve / dahil), sadece değeri kaydet
+      return [
+        ...filtered,
+        {
+          PersonelTcKimlik: satir.tcKimlik,
+          Tarih: tarih,
+          HucreDeger: degerTemiz
+        }
+      ];
+    });
   };
 
   const updateInfoField = (satirIndex: number, field: keyof Pick<PuantajSatir, 'netSoforluk' | 'gunlukBrut' | 'yolYardimi'>, value: string) => {
+    const satir = puantajVerisi[satirIndex];
+    if (!satir || gunler.length === 0) return;
+
     setPuantajVerisi(prev => {
       const yeni = [...prev];
       if (!yeni[satirIndex]) return prev;
       yeni[satirIndex] = { ...yeni[satirIndex], [field]: value };
       return yeni;
+    });
+    
+    // İlk günü tarih olarak kullan (NetSoforluk, GunlukBrut, YolYardimi ayda bir kez kaydedilir)
+    const ilkGunTarihi = `${gunler[0].getFullYear()}-${String(gunler[0].getMonth() + 1).padStart(2, '0')}-${String(gunler[0].getDate()).padStart(2, '0')}`;
+    
+    const fieldMap = {
+      netSoforluk: 'NetSoforluk',
+      gunlukBrut: 'GunlukBrut',
+      yolYardimi: 'YolYardimi'
+    };
+    
+    // Kaydedilecek değişiklikler listesine ekle veya güncelle
+    setKaydedilecekDegisiklikler((prev) => {
+      const existing = prev.find(
+        (d) => d.PersonelTcKimlik === satir.tcKimlik && d.Tarih === ilkGunTarihi
+      );
+      
+      if (existing) {
+        return prev.map((d) =>
+          d.PersonelTcKimlik === satir.tcKimlik && d.Tarih === ilkGunTarihi
+            ? { ...d, [fieldMap[field]]: value }
+            : d
+        );
+      } else {
+        return [
+          ...prev,
+          {
+            PersonelTcKimlik: satir.tcKimlik,
+            Tarih: ilkGunTarihi,
+            [fieldMap[field]]: value
+          }
+        ];
+      }
     });
   };
 
@@ -499,9 +1083,46 @@ export default function PuantajPage() {
                   <ChevronRight className="w-4 h-4" />
                 </button>
 
+                <button 
+                  onClick={degisiklikleriKaydet} 
+                  disabled={kaydediliyor || kaydedilecekDegisiklikler.length === 0}
+                  className={`ml-2 px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-lg text-sm relative ${
+                    kaydediliyor || kaydedilecekDegisiklikler.length === 0
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                  title={kaydedilecekDegisiklikler.length > 0 ? `${kaydedilecekDegisiklikler.length} değişiklik kaydedilecek` : 'Kaydedilecek değişiklik yok'}
+                >
+                  <Save className="w-4 h-4" />
+                  Kaydet
+                  {kaydedilecekDegisiklikler.length > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-bold">
+                      {kaydedilecekDegisiklikler.length}
+                    </span>
+                  )}
+                </button>
+                
+                <button 
+                  onClick={degisiklikleriCek} 
+                  disabled={kaydediliyor}
+                  className={`ml-2 px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-lg text-sm ${
+                    kaydediliyor 
+                      ? 'bg-gray-400 cursor-not-allowed text-white'
+                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                  }`}
+                  title="Veritabanından manuel değişiklikleri yükle"
+                >
+                  <Database className="w-4 h-4" />
+                  Değişiklikleri Çek
+                </button>
+
                 <button onClick={excelAktar} className="ml-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-1.5 transition-all shadow-lg text-sm">
                   <Download className="w-4 h-4" />
                   Excel Aktar
+                </button>
+                <button onClick={pdfAktar} className="ml-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg flex items-center gap-1.5 transition-all shadow-lg text-sm">
+                  <FileText className="w-4 h-4" />
+                  PDF Aktar
                 </button>
                 <button onClick={() => { setPuantajYuklenmedi(false); yukleVeriler(); }} title="Puantaj Yenile" className="ml-2 p-2 bg-white hover:bg-gray-50 border border-gray-300 rounded-lg text-gray-700">
                   <RefreshCw className="w-4 h-4" />
@@ -523,17 +1144,17 @@ export default function PuantajPage() {
               <table className={`w-full border-collapse text-[10px] ${isDark ? 'text-white' : 'text-gray-900'}`}>
                 <thead className={`sticky top-0 z-10 ${isDark ? 'bg-[#1e1e1e]' : 'bg-gray-100'}`}>
                   <tr>
-                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[35px] sticky left-0 z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>SIRA</th>
+                    <th className={`border px-0.5 py-0.5 font-semibold text-center w-[15px] sticky left-0 z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>SIRA</th>
                     <th className={`border px-0.5 py-0.5 font-semibold text-center w-[85px] sticky left-[35px] z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>TC NO</th>
                     <th className={`border px-0.5 py-0.5 font-semibold text-center w-[120px] sticky left-[120px] z-20 ${isDark ? 'bg-[#1e1e1e] border-gray-700' : 'bg-gray-100 border-gray-300'}`}>ADI SOYADI</th>
-            <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>İŞE GİRİŞ TARİHİ</th>
+            <th className={`border px-0.5 py-0.5 font-semibold text-center w-[85px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>İŞE GİRİŞ TARİHİ</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>İŞTEN AYRILIŞ TARİHİ</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>GÜNLÜK BRÜT ÜCRET</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[90px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>{/* Ay adı dinamik */} {new Date(secilenAy + '-01').toLocaleDateString('tr-TR', { month: 'long' }).toUpperCase()} AYI MESAİ SAATİ</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[65px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>MESAI SAATİ</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[95px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>FAZLA MESAİ SÜRESİ</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[75px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>YOL YARDIMI</th>
-              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[145px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>NET ŞOFÖRLÜK PARASI EKLENECEK</th>
+              <th className={`border px-0.5 py-0.5 font-semibold text-center w-[45px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>NET ŞOFÖRLÜK</th>
               <th className={`border px-0.5 py-0.5 font-semibold text-center w-[85px] ${isDark ? 'border-gray-700' : 'border-gray-300'}`}>EKİP ŞEFİ</th>
                     {gunler.map((gun) => {
                       const gunAdi = gun.toLocaleDateString('tr-TR', { weekday: 'short' }).substring(0, 2).toUpperCase();
@@ -565,7 +1186,7 @@ export default function PuantajPage() {
                           'MESAI SAATİ',
                           'FAZLA MESAİ SÜRESİ',
                           'YOL YARDIMI',
-                          'NET ŞOFÖRLÜK PARASI EKLENECEK',
+                          'NET ŞOFÖRLÜK',
                           'EKİP ŞEFİ'
                         ];
 
@@ -638,9 +1259,11 @@ export default function PuantajPage() {
                           return gunler.map((gun) => {
                             const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
                             const hucre = satir.hucreler[tarih];
+                            const manuelDegisti = manuelDegisiklikler[satir.tcKimlik]?.[tarih];
                             return (
-                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} relative`} style={{ backgroundColor: hucre?.renk }}>
                                 <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                {manuelDegisti && <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-orange-500 rounded-full" title="Manuel değiştirildi"></div>}
                               </td>
                             );
                           });
@@ -663,9 +1286,11 @@ export default function PuantajPage() {
                           return gunler.map((gun) => {
                             const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
                             const hucre = satir.hucreler[tarih];
+                            const manuelDegisti = manuelDegisiklikler[satir.tcKimlik]?.[tarih];
                             return (
-                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                              <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} relative`} style={{ backgroundColor: hucre?.renk }}>
                                 <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                {manuelDegisti && <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-orange-500 rounded-full" title="Manuel değiştirildi"></div>}
                               </td>
                             );
                           });
@@ -685,9 +1310,11 @@ export default function PuantajPage() {
                             {remaining.map((gun) => {
                               const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
                               const hucre = satir.hucreler[tarih];
+                              const manuelDegisti = manuelDegisiklikler[satir.tcKimlik]?.[tarih];
                               return (
-                                <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'}`} style={{ backgroundColor: hucre?.renk }}>
+                                <td key={tarih} className={`border px-0.5 py-0.5 ${isDark ? 'border-gray-700' : 'border-gray-300'} relative`} style={{ backgroundColor: hucre?.renk }}>
                                   <input type="text" value={hucre?.deger || ''} onChange={(e) => hucreGuncelle(satirIndex, tarih, e.target.value)} className={`w-full px-0.5 py-0.5 text-[10px] text-center bg-transparent border-none outline-none focus:ring-1 focus:ring-blue-500 rounded ${isDark ? 'text-white' : 'text-gray-900'}`} />
+                                  {manuelDegisti && <div className="absolute top-0 right-0 w-1.5 h-1.5 bg-orange-500 rounded-full" title="Manuel değiştirildi"></div>}
                                 </td>
                               );
                             })}
