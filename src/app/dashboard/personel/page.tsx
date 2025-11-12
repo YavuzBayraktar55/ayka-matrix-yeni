@@ -7,7 +7,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { createClient } from '@/lib/supabase/client';
 import { PersonelLevelizasyon, PersonelInfo, BolgeInfo, UserRole } from '@/types/database';
-import { Users, Plus, Edit, Trash2, Search, X, Eye, CalendarPlus } from 'lucide-react';
+import { Users, Plus, Edit, Trash2, Search, X, Eye, CalendarPlus, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -301,6 +301,40 @@ export default function PersonelPage() {
   const handleView = (personel: FullPersonel) => {
     setViewingPersonel(personel);
     setViewModalOpen(true);
+  };
+
+  const handleCreateSozlesme = async (personel: FullPersonel) => {
+    try {
+      const response = await fetch('/api/sozlesme-olustur', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personelId: personel.PersonelTcKimlik.toString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.error || 'Sözleşme oluşturulamadı');
+        return;
+      }
+
+      // Word dosyasını indir
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sozlesme_${personel.PersonelInfo?.P_AdSoyad || personel.PersonelTcKimlik}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Sözleşme oluşturma hatası:', error);
+      alert('Sözleşme oluşturulurken bir hata oluştu');
+    }
   };
 
   const closeModal = () => {
@@ -654,6 +688,23 @@ export default function PersonelPage() {
                                 title="İzin Oluştur"
                               >
                                 <CalendarPlus className="w-4 h-4" />
+                              </button>
+                            )}
+
+                            {/* Sözleşme Oluştur - Koordinatör, Yönetici ve İK */}
+                            {(user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') && (
+                              <button
+                                onClick={() => handleCreateSozlesme(personel)}
+                                className={`
+                                  p-2.5 rounded-xl transition-all transform hover:scale-110
+                                  ${isDark 
+                                    ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 border border-amber-500/30' 
+                                    : 'bg-amber-50 text-amber-600 hover:bg-amber-100 border border-amber-200'
+                                  }
+                                `}
+                                title="Sözleşme Oluştur"
+                              >
+                                <FileText className="w-4 h-4" />
                               </button>
                             )}
 

@@ -308,7 +308,7 @@ function YeniSablonDuzenleyiciContent() {
       // Word dosyasını ArrayBuffer'a çevir
       const arrayBuffer = await file.arrayBuffer();
       
-      // Mammoth ile HTML'e çevir
+      // Mammoth ile HTML'e çevir - Header ve Footer dahil
       const result = await mammoth.convertToHtml(
         { arrayBuffer },
         {
@@ -316,10 +316,13 @@ function YeniSablonDuzenleyiciContent() {
             "p[style-name='Heading 1'] => h1:fresh",
             "p[style-name='Heading 2'] => h2:fresh",
             "p[style-name='Heading 3'] => h3:fresh",
+            "p[style-name='Header'] => div.document-header:fresh",
+            "p[style-name='Footer'] => div.document-footer:fresh",
             "b => strong",
             "i => em",
           ],
           includeDefaultStyleMap: true,
+          includeEmbeddedStyleMap: true,
           convertImage: mammoth.images.imgElement((image) => {
             return image.read("base64").then((imageBuffer) => {
               return {
@@ -331,19 +334,43 @@ function YeniSablonDuzenleyiciContent() {
       );
 
       if (result.value) {
+        // İçeriği temizle ve düzenle
+        let processedContent = result.value;
+        
+        // Header ve Footer'ları ayıkla ve işaretle
+        processedContent = processedContent.replace(
+          /<div class="document-header">(.*?)<\/div>/gi,
+          '<div style="border: 2px dashed #3b82f6; padding: 12px; margin: 16px 0; background: #eff6ff; border-radius: 8px;"><div style="color: #1e40af; font-weight: bold; font-size: 11px; margin-bottom: 8px;">📄 ÜST BİLGİ (HEADER)</div>$1</div>'
+        );
+        
+        processedContent = processedContent.replace(
+          /<div class="document-footer">(.*?)<\/div>/gi,
+          '<div style="border: 2px dashed #10b981; padding: 12px; margin: 16px 0; background: #ecfdf5; border-radius: 8px;"><div style="color: #047857; font-weight: bold; font-size: 11px; margin-bottom: 8px;">📄 ALT BİLGİ (FOOTER)</div>$1</div>'
+        );
+        
         // Mevcut içeriğin sonuna ekle
         const newContent = editorContent 
-          ? `${editorContent}<br/><br/>${result.value}`
-          : result.value;
+          ? `${editorContent}<hr style="margin: 24px 0; border: 1px dashed #ccc;" />${processedContent}`
+          : processedContent;
         
         setEditorContent(newContent);
         
         console.log('✅ Word içeriği başarıyla yüklendi');
-        alert(`✅ Word dosyası başarıyla yüklendi!\n📝 ${file.name}\n\n💡 İçerik editörün sonuna eklendi.`);
         
+        // Uyarı mesajlarını kontrol et
+        let warningText = '';
         if (result.messages.length > 0) {
           console.warn('⚠️ Dönüştürme uyarıları:', result.messages);
+          const headerFooterWarning = result.messages.some(m => 
+            m.message.toLowerCase().includes('header') || 
+            m.message.toLowerCase().includes('footer')
+          );
+          if (headerFooterWarning) {
+            warningText = '\n\n⚠️ Not: Mammoth kütüphanesi header/footer\'ları tam desteklemeyebilir. Ana içerik yüklendi.';
+          }
         }
+        
+        alert(`✅ Word dosyası başarıyla yüklendi!\n📝 ${file.name}\n\n💡 İçerik editörün sonuna eklendi.${warningText}`);
       } else {
         alert('❌ Word dosyasından içerik okunamadı!');
       }
@@ -398,9 +425,9 @@ function YeniSablonDuzenleyiciContent() {
               /* Sayfa Ayarları - A4 */
               @page Section1 {
                 size: 21.0cm 29.7cm;
-                margin: 2.54cm 1.91cm 2.54cm 1.91cm;  /* 1 inch kenar boşluğu */
-                mso-header-margin: 1.27cm;
-                mso-footer-margin: 1.27cm;
+                margin: 1.27cm 1.27cm 1.27cm 1.27cm;  /* 0.5 inch kenar boşluğu (daha dar) */
+                mso-header-margin: 0.5cm;
+                mso-footer-margin: 0.5cm;
                 mso-paper-source: 0;
               }
               
@@ -415,6 +442,23 @@ function YeniSablonDuzenleyiciContent() {
                 line-height: 1.5;
                 margin: 0;
                 padding: 0;
+              }
+              
+              /* Header ve Footer stilleri */
+              .document-header {
+                border: 2px dashed #3b82f6;
+                padding: 12px;
+                margin: 16px 0;
+                background-color: #eff6ff;
+                border-radius: 8px;
+              }
+              
+              .document-footer {
+                border: 2px dashed #10b981;
+                padding: 12px;
+                margin: 16px 0;
+                background-color: #ecfdf5;
+                border-radius: 8px;
               }
               
               /* Paragraf Ayarları */
@@ -838,7 +882,7 @@ function YeniSablonDuzenleyiciContent() {
                     font-family: 'Calibri', Arial, sans-serif; 
                     font-size: 11pt;
                     line-height: 1.5;
-                    padding: 2.54cm 1.91cm;  /* 1 inch = 2.54cm kenar boşluğu */
+                    padding: 1.27cm 1.27cm;  /* Daha dar kenar boşlukları (0.5 inch) */
                     background: white;
                     width: 21cm;  /* A4 genişlik */
                     margin: 0 auto;
@@ -1008,10 +1052,11 @@ function YeniSablonDuzenleyiciContent() {
               isDark ? 'text-blue-200' : 'text-blue-600'
             )}>
               <li>• <strong>📤 Word&apos;den Yükle:</strong> &quot;Word&apos;den Yükle&quot; butonu ile hazır Word belgelerini direkt içe aktarın! Tüm tablolar, başlıklar ve formatlar korunur.</li>
-              <li>• <strong>📋 Kopyala-Yapıştır:</strong> Word&apos;den tablolar dahil içeriği kopyalayıp direkt yapıştırabilirsiniz</li>
+              <li>• <strong>� Header/Footer:</strong> Word&apos;den yüklenen üst bilgi ve alt bilgiler mavi/yeşil çerçeveli kutularda gösterilir</li>
+              <li>• <strong>�📋 Kopyala-Yapıştır:</strong> Word&apos;den tablolar dahil içeriği kopyalayıp direkt yapıştırabilirsiniz</li>
               <li>• <strong>🏷️ Değişkenler:</strong> &quot;Değişken Ekle&quot; butonundan {'{personel_adi}'}, {'{tc_no}'} gibi otomatik alanlar ekleyin</li>
               <li>• <strong>📊 Tablolar:</strong> Toolbar&apos;daki tablo araçlarıyla sütun/satır ekleyip düzenleyebilirsiniz</li>
-              <li>• <strong>📏 Sayfa Sınırları:</strong> Editörde kırmızı kesikli çizgi ve &quot;SAYFA SONU&quot; yazısı A4 sayfa sınırlarını gösterir (21cm x 29.7cm)</li>
+              <li>• <strong>📏 Sayfa Sınırları:</strong> Editörde kırmızı kesikli çizgi ve &quot;SAYFA SONU&quot; yazısı A4 sayfa sınırlarını gösterir (0.5 inch kenar)</li>
               <li>• <strong>👁️ Önizleme:</strong> &quot;Önizle&quot; butonuyla gerçek sayfa görünümünü kontrol edin</li>
               <li>• <strong>💾 Word İndir:</strong> Şablonu Word formatında (.docx) indirip bilgisayarınızda PDF&apos;e çevirebilirsiniz</li>
             </ul>
@@ -1080,7 +1125,7 @@ function YeniSablonDuzenleyiciContent() {
                             style={{
                               width: '794px',
                               minHeight: `${A4_HEIGHT}px`,
-                              padding: '60px 80px',
+                              padding: '48px 48px',  /* Daha dar kenar (0.5 inch = 48px @ 96 DPI) */
                               fontFamily: 'Arial, sans-serif',
                               fontSize: '14px',
                               lineHeight: '1.6',
