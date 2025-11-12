@@ -65,7 +65,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [showProfileInfo, setShowProfileInfo] = useState(false);
-  const [currentTime, setCurrentTime] = useState(new Date());
   
   // Console panel state
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -98,14 +97,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   useEffect(() => {
     stopNavigation();
   }, [pathname, stopNavigation]);
-
-  // Saat güncelleme
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const handleSignOut = async () => {
     await signOut();
@@ -162,9 +153,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
     },
     {
-      name: 'Şablon Düzenleyici',
+      name: 'Şablon Düzenleyici (Eski)',
       icon: FileText,
       href: '/dashboard/sablon-duzenleyici',
+      roles: ['insan_kaynaklari', 'yonetici']
+    },
+    {
+      name: '📝 Word Şablon Düzenleyici',
+      icon: FileText,
+      href: '/dashboard/yeni-sablon-duzenleyici',
       roles: ['insan_kaynaklari', 'yonetici']
     },
   ];
@@ -523,28 +520,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 >
                   {isDark ? <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />}
                 </button>
-
-                {/* Saat - Gizle çok küçük ekranlarda */}
-                <div className={cn(
-                  'hidden sm:block px-2 sm:px-3 py-1 sm:py-2 rounded-lg cursor-default',
-                  isDark ? 'text-gray-300' : 'text-gray-700'
-                )}>
-                  <div className="text-right leading-tight">
-                    <div className="text-[10px] sm:text-xs font-semibold">
-                      {currentTime.toLocaleTimeString('tr-TR', { 
-                        hour: '2-digit', 
-                        minute: '2-digit' 
-                      })}
-                    </div>
-                    <div className="text-[8px] sm:text-[9px]">
-                      {currentTime.toLocaleDateString('tr-TR', { 
-                        day: '2-digit', 
-                        month: '2-digit', 
-                        year: 'numeric' 
-                      })}
-                    </div>
-                  </div>
-                </div>
 
                 {/* User Panel */}
                 <div className="relative">

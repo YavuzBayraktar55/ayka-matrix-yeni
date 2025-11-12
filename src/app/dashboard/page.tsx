@@ -60,7 +60,7 @@ export default function DashboardPage() {
   return (
     <ProtectedRoute>
       <DashboardLayout>
-        <div className="space-y-6 sm:space-y-8 animate-slide-up">
+        <div className="space-y-6 sm:space-y-8">
             {/* Welcome Section - Modern Hero */}
             <div className={`
               relative overflow-hidden rounded-2xl sm:rounded-3xl p-8 sm:p-10 border
@@ -68,11 +68,11 @@ export default function DashboardPage() {
                 ? 'bg-gradient-to-br from-blue-600/20 via-purple-600/20 to-pink-600/20 border-blue-500/30' 
                 : 'bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-pink-500/10 border-blue-300/30'
               }
-              backdrop-blur-xl shadow-2xl
+              backdrop-blur-md shadow-xl
             `}>
-              {/* Decorative elements */}
-              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-              <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-pink-500/20 to-orange-500/20 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
+              {/* Decorative elements - Daha hafif blur */}
+              <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-br from-blue-500/20 to-purple-500/20 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2"></div>
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-gradient-to-tr from-pink-500/20 to-orange-500/20 rounded-full blur-2xl translate-y-1/2 -translate-x-1/2"></div>
               
               <div className="relative z-10">
                 <div className="flex items-center gap-3 mb-4">
@@ -99,7 +99,7 @@ export default function DashboardPage() {
                     : 'bg-blue-500/10 border border-blue-500/20'
                   }
                 `}>
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                   <span className={`text-sm font-medium ${isDark ? 'text-blue-300' : 'text-blue-700'}`}>
                     {user && getRoleLabel(user.PersonelRole)}
                   </span>
@@ -109,7 +109,7 @@ export default function DashboardPage() {
 
             {/* Stats Grid - Modern Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-              {filteredStats.map((stat, index) => {
+              {filteredStats.map((stat) => {
                 const Icon = stat.icon;
                 return (
                   <div
@@ -120,22 +120,20 @@ export default function DashboardPage() {
                         ? 'bg-gray-800/50 border-gray-700/50 hover:bg-gray-800/70 hover:border-gray-600/70' 
                         : 'bg-white/50 border-gray-200/50 hover:bg-white/70 hover:border-gray-300/70'
                       }
-                      backdrop-blur-xl shadow-xl hover:shadow-2xl
-                      transform hover:-translate-y-1 transition-all duration-300
+                      backdrop-blur-md shadow-lg hover:shadow-xl
+                      transform hover:-translate-y-1 transition-all duration-200
                       cursor-pointer
-                      animate-scale-in
                     `}
-                    style={{ animationDelay: `${index * 100}ms` }}
                   >
                     {/* Gradient overlay on hover */}
-                    <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
+                    <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-0 group-hover:opacity-5 transition-opacity duration-200`}></div>
                     
                     <div className="relative z-10">
                       <div className="flex items-center justify-between mb-4">
                         <div className={`
                           w-14 h-14 rounded-xl bg-gradient-to-br ${stat.color} 
                           flex items-center justify-center shadow-lg
-                          group-hover:scale-110 transition-transform duration-300
+                          group-hover:scale-105 transition-transform duration-200
                         `}>
                           <Icon className="w-7 h-7 text-white" />
                         </div>
