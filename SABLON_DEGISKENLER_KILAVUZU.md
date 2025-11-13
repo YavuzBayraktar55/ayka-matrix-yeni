@@ -160,10 +160,10 @@ Bazı değişkenler veritabanında BÜYÜK HARF olarak saklanır. Bunları düzg
 | Değişken | Açıklama | Örnek Değer |
 |----------|----------|-------------|
 | `{sirket_adi}` | Şirket unvanı | AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ. |
-| `{sirket_adi_duzgun}` | Şirket unvanı (başharfler büyük) | Ay-Ka Doğalgaz Enerji Gıda Turz. Sofra ve Taahhüt Hiz. San. Tic. Ltd. Şti. |
+| `{sirket_adi_duzgun}` | Şirket unvanı (başharfler büyük) | Ay-Ka Doğalgaz Enerji Gıda Turz. Sofra Ve Taahhüt Hiz. San. Tic. Ltd. Şti. |
 | `{sirket_adres}` | Şirket adresi | Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul |
 | `{sirket_adres_duzgun}` | Şirket adresi (başharfler büyük) | Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul |
-| `{sgk_isyeri_sicil}` | SGK İşyeri Sicil Numarası | 4 8299 01 01 1041135 068 01 61 |
+| `{sgk_isyeri_sicil}` | **DİNAMİK!** Personelin bölgesine ait SGK Sicil No (/ sonrası kesilir) | 482990101105531201901-38 |
 
 ---
 

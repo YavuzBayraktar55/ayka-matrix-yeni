@@ -31,10 +31,18 @@ function formatDate(date: string | Date | null): string {
 function toTitleCase(str: string | number | null): string {
   if (!str) return '';
   const strValue = String(str);
+  
+  // Türkçe karakterler için özel işlem
   return strValue
-    .toLowerCase()
+    .toLocaleLowerCase('tr-TR')
     .split(' ')
-    .map(word => word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1).toLocaleLowerCase('tr-TR'))
+    .map(word => {
+      if (word.length === 0) return word;
+      // İlk harfi Türkçe locale ile büyük yap
+      const firstChar = word.charAt(0).toLocaleUpperCase('tr-TR');
+      const restOfWord = word.slice(1);
+      return firstChar + restOfWord;
+    })
     .join(' ');
 }
 
@@ -205,10 +213,10 @@ export async function POST(request: NextRequest) {
       
       // Şirket Bilgileri
       sirket_adi: 'AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ.',
-      sirket_adi_duzgun: toTitleCase('AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ.'),
-      sirket_adres: 'Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul',
-      sirket_adres_duzgun: toTitleCase('Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul'),
-      sgk_isyeri_sicil: '4 8299 01 01 1041135 068 01 61',
+      sirket_adi_duzgun: 'Ay-Ka Doğalgaz Enerji Gıda Turz. Sofra Ve Taahhüt Hiz. San. Tic. Ltd. Şti.',
+      sirket_adres: bolgeInfo.BolgeAdres || 'Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul',
+      sirket_adres_duzgun: bolgeInfo.BolgeAdres || 'Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul',
+      sgk_isyeri_sicil: bolgeInfo.BolgeSicilNo ? bolgeInfo.BolgeSicilNo.split('/')[0] : '',
       
       // Belgeler için dinamik tarihler
       hazirlama_tarihi: formatDate(bugun),
@@ -235,6 +243,13 @@ export async function POST(request: NextRequest) {
     };
 
     console.log('📝 Değişkenler hazırlandı:', Object.keys(data).length, 'adet');
+    console.log('🔍 Şirket değişkenleri:', {
+      sirket_adres: data.sirket_adres,
+      sirket_adres_duzgun: data.sirket_adres_duzgun,
+      bolgeAdres: bolgeInfo.BolgeAdres,
+      type_sirket_adres: typeof data.sirket_adres,
+      type_sirket_adres_duzgun: typeof data.sirket_adres_duzgun
+    });
 
     // Değişkenleri şablona uygula
     try {
