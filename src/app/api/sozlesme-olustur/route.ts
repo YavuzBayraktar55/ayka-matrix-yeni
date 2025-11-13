@@ -176,8 +176,12 @@ export async function POST(request: NextRequest) {
       bolge_duzgun: toTitleCase(bolgeInfo.BolgeAdi),
       pozisyon: personelInfo.P_Gorevi || '',
       pozisyon_duzgun: toTitleCase(personelInfo.P_Gorevi),
-      departman: personelInfo.P_Sube || '',
-      departman_duzgun: toTitleCase(personelInfo.P_Sube),
+      // departman ve pozisyon aynı şeyi gösteriyor (P_Gorevi)
+      departman: personelInfo.P_Gorevi || '',
+      departman_duzgun: toTitleCase(personelInfo.P_Gorevi),
+      // Eğer P_Sube kullanmak isterseniz:
+      sube: personelInfo.P_Sube || '',
+      sube_duzgun: toTitleCase(personelInfo.P_Sube),
       
       // Eğitim
       mezuniyet: personelInfo.P_Mezuniyet || '',

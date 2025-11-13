@@ -74,8 +74,10 @@ Bazı değişkenler veritabanında BÜYÜK HARF olarak saklanır. Bunları düzg
 | `{bolge_duzgun}` | Bölge (başharfler büyük) | İstanbul Anadolu |
 | `{pozisyon}` | Görevi/pozisyonu | Teknisyen |
 | `{pozisyon_duzgun}` | Pozisyon (başharfler büyük) | Teknisyen |
-| `{departman}` | Departman/şube | Teknik Servis |
-| `{departman_duzgun}` | Departman (başharfler büyük) | Teknik Servis |
+| `{departman}` | **Görevi/pozisyonu** (pozisyon ile aynı) | Teknisyen |
+| `{departman_duzgun}` | Görev (başharfler büyük) | Teknisyen |
+| `{sube}` | Şube bilgisi (P_Sube alanı) | Teknik Servis |
+| `{sube_duzgun}` | Şube (başharfler büyük) | Teknik Servis |
 
 ---
 
