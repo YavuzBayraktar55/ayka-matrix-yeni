@@ -203,3 +203,18 @@ export interface GunlukCalisma {
   created_at: string;
   updated_at: string;
 }
+
+// Şablon Dosyaları (Supabase Storage)
+export interface SablonDosyalari {
+  sablonid: string; // UUID
+  sablonadi: string;
+  sablonturu: 'sozlesme' | 'izin' | 'avans' | 'genel';
+  dosyaadi: string;
+  dosyayolu: string;
+  dosyaboyutu: number | null;
+  versiyon: number;
+  aciklama: string | null;
+  yukleyenkullanici: number | null;
+  created_at: string;
+  updated_at: string;
+}

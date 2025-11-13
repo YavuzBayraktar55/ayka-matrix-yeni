@@ -2,8 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import { promises as fs } from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,13 +18,31 @@ function formatDate(date: string | Date | null): string {
   return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
-// Helper: Para formatla
-function formatCurrency(amount: number | null): string {
-  if (!amount) return '0,00 TL';
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY'
-  }).format(amount);
+// Helper: Para formatla (ileride kullanılabilir)
+// function formatCurrency(amount: number | null): string {
+//   if (!amount) return '0,00 TL';
+//   return new Intl.NumberFormat('tr-TR', {
+//     style: 'currency',
+//     currency: 'TRY'
+//   }).format(amount);
+// }
+
+// Helper: String'i düzgün formata çevir (her kelimenin ilk harfi büyük)
+function toTitleCase(str: string | number | null): string {
+  if (!str) return '';
+  const strValue = String(str);
+  return strValue
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toLocaleUpperCase('tr-TR') + word.slice(1).toLocaleLowerCase('tr-TR'))
+    .join(' ');
+}
+
+// Helper: TC No formatla (123 456 789 01)
+function formatTcNo(tc: string | number | null): string {
+  if (!tc) return '';
+  const tcStr = String(tc);
+  return tcStr.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1 $2 $3 $4');
 }
 
 export async function POST(request: NextRequest) {
@@ -64,19 +80,44 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Personel bulundu:', personelInfo.P_AdSoyad);
 
-    // Şablon dosyasını yükle
-    const templatePath = path.join(process.cwd(), 'public', 'templates', `${sablonTuru}-sablon.docx`);
+    // Şablon dosyasını Supabase Storage'dan yükle
+    console.log('📥 Şablon dosyası Storage\'dan indiriliyor:', sablonTuru);
     
-    let content: Buffer;
-    try {
-      content = await fs.readFile(templatePath);
-      console.log('✅ Şablon dosyası okundu:', templatePath);
-    } catch (error) {
-      console.error('❌ Şablon dosyası okunamadı:', error);
+    // Önce şablon metadata'sını al
+    const { data: sablonMeta, error: sablonError } = await supabaseAdmin
+      .from('sablondosyalari')
+      .select('*')
+      .eq('sablonturu', sablonTuru)
+      .single();
+
+    if (sablonError || !sablonMeta) {
+      console.error('❌ Şablon metadata bulunamadı:', sablonError);
       return NextResponse.json({ 
-        error: 'Şablon dosyası bulunamadı. Lütfen public/templates/ klasörüne şablon yükleyin.' 
+        error: `${sablonTuru} türünde şablon bulunamadı. Lütfen önce şablon yükleyin.` 
       }, { status: 404 });
     }
+
+    console.log('✅ Şablon metadata bulundu:', sablonMeta.dosyayolu);
+
+    // Storage'dan dosyayı indir
+    const { data: fileData, error: downloadError } = await supabaseAdmin
+      .storage
+      .from('sablonlar')
+      .download(sablonMeta.dosyayolu);
+
+    if (downloadError || !fileData) {
+      console.error('❌ Şablon dosyası indirilemedi:', downloadError);
+      return NextResponse.json({ 
+        error: 'Şablon dosyası indirilemedi',
+        details: downloadError?.message 
+      }, { status: 500 });
+    }
+
+    // Blob'u Buffer'a çevir
+    const arrayBuffer = await fileData.arrayBuffer();
+    const content = Buffer.from(arrayBuffer);
+    
+    console.log('✅ Şablon dosyası indirildi, boyut:', content.length, 'bytes');
 
     // Docxtemplater ile şablonu işle
     const zip = new PizZip(content);
@@ -98,12 +139,18 @@ export async function POST(request: NextRequest) {
     const data = {
       // Personel Bilgileri (PersonelInfo tablosundan)
       personel_adi: personelInfo.P_AdSoyad || '',
+      personel_adi_duzgun: toTitleCase(personelInfo.P_AdSoyad),
+      personel_adi_kucuk: (personelInfo.P_AdSoyad || '').toLowerCase(),
       personel_soyadi: '',
       personel_tam_adi: personelInfo.P_AdSoyad || '',
       tc_no: personelLevel.PersonelTcKimlik || '',
+      tc_no_duzgun: formatTcNo(personelLevel.PersonelTcKimlik),
       dogum_tarihi: formatDate(personelInfo.P_DogumTarihi),
+      dogum_yili: personelInfo.P_DogumTarihi ? new Date(personelInfo.P_DogumTarihi).getFullYear().toString() : '',
       dogum_yeri: personelInfo.P_DogumYeri || '',
+      dogum_yeri_duzgun: toTitleCase(personelInfo.P_DogumYeri),
       baba_adi: personelInfo.P_BabaAdi || '',
+      baba_adi_duzgun: toTitleCase(personelInfo.P_BabaAdi),
       
       // Medeni Durum
       medeni_hali: personelInfo.P_MedeniHali ? 'Evli' : 'Bekar',
@@ -114,11 +161,15 @@ export async function POST(request: NextRequest) {
       telefon: personelInfo.P_TelNo || '',
       email: personelLevel.PersonelEmail || '',
       adres: personelInfo.P_Adres || '',
+      adres_duzgun: toTitleCase(personelInfo.P_Adres),
       
       // İş Bilgileri
       bolge: bolgeInfo.BolgeAdi || '',
+      bolge_duzgun: toTitleCase(bolgeInfo.BolgeAdi),
       pozisyon: personelInfo.P_Gorevi || '',
+      pozisyon_duzgun: toTitleCase(personelInfo.P_Gorevi),
       departman: personelInfo.P_Sube || '',
+      departman_duzgun: toTitleCase(personelInfo.P_Sube),
       
       // Eğitim
       mezuniyet: personelInfo.P_Mezuniyet || '',
@@ -154,7 +205,10 @@ export async function POST(request: NextRequest) {
       
       // Şirket Bilgileri
       sirket_adi: 'AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ.',
-      sirket_adres: 'İstanbul, Türkiye',
+      sirket_adi_duzgun: toTitleCase('AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ.'),
+      sirket_adres: 'Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul',
+      sirket_adres_duzgun: toTitleCase('Kocatepe Mahallesi, Paşa Caddesi, No:17/B, Bayrampaşa/İstanbul'),
+      sgk_isyeri_sicil: '4 8299 01 01 1041135 068 01 61',
       
       // Belgeler için dinamik tarihler
       hazirlama_tarihi: formatDate(bugun),

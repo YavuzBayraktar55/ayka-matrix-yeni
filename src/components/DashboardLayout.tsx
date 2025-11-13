@@ -153,6 +153,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
     },
     {
+      name: 'Şablonlar',
+      icon: FileText,
+      href: '/dashboard/sablonlar',
+      roles: ['insan_kaynaklari', 'yonetici']
+    },
+    {
       name: 'Şablon Düzenleyici (Eski)',
       icon: FileText,
       href: '/dashboard/sablon-duzenleyici',
