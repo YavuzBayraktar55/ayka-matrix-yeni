@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef, useMemo, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useSearchParams, useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -11,6 +11,8 @@ import { Calendar, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle, Hi
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useIzinTalepleri } from '@/hooks/useIzinTalepleri';
+import debounce from 'lodash/debounce';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,8 +34,16 @@ function IzinTalepleriContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   
-  const [talepler, setTalepler] = useState<FullIzinTalep[]>([]);
-  const [loading, setLoading] = useState(true);
+  // SWR ile data fetching
+  const { 
+    talepler: swrTalepler, 
+    isLoading: loading, 
+    mutate: refreshTalepler 
+  } = useIzinTalepleri({
+    userEmail: user?.PersonelEmail || '',
+    userRole: user?.PersonelRole || '',
+    enabled: !!(user?.PersonelEmail && user?.PersonelRole)
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDurum, setFilterDurum] = useState<string>('all');
   const [filterTur, setFilterTur] = useState<string>('all');
@@ -76,9 +86,6 @@ function IzinTalepleriContent() {
     DegisiklikNotu: '',
   });
 
-  useEffect(() => {
-    fetchTalepler();
-  }, []);
 
   // Query params'dan personel bilgisini kontrol et
   useEffect(() => {
@@ -108,79 +115,36 @@ function IzinTalepleriContent() {
     }
   }, [searchParams, user, router]);
 
-  // Form tarihlerini değiştiğinde izin hesabını güncelle
-  useEffect(() => {
-    const hesaplaIzin = async () => {
-      const targetTcKimlik = creatingForPersonel?.tcKimlik || user?.PersonelTcKimlik?.toString();
-      
-      console.log('🧮 İzin hesaplama useEffect çalıştı:', {
-        creatingForPersonel: !!creatingForPersonel,
-        targetTcKimlik,
-        hasDates: !!(formData.BaslangicTarihi && formData.BitisTarihi)
-      });
-      
-      if (formData.BaslangicTarihi && formData.BitisTarihi && targetTcKimlik) {
-        try {
-          console.log('⏳ calculateWorkingDays çağrılıyor...', {
-            tcKimlik: targetTcKimlik,
-            baslangic: formData.BaslangicTarihi,
-            bitis: formData.BitisTarihi
-          });
-          
-          const hesap = await calculateWorkingDays(
-            targetTcKimlik,
-            formData.BaslangicTarihi,
-            formData.BitisTarihi
-          );
-          
-          console.log('✅ İzin hesaplama başarılı:', hesap);
-          setIzinHesapBilgisi(hesap);
-        } catch (error) {
-          console.error('❌ İzin hesaplama hatası:', error);
-          setIzinHesapBilgisi(null);
-        }
-      } else {
+  // Debounced izin hesaplama fonksiyonu - 500ms bekler
+  const debouncedCalculateIzin = useRef(
+    debounce(async (targetTcKimlik: string, baslangic: string, bitis: string) => {
+      try {
+        const hesap = await calculateWorkingDays(targetTcKimlik, baslangic, bitis);
+        setIzinHesapBilgisi(hesap);
+      } catch (error) {
+        console.error('❌ İzin hesaplama hatası:', error);
         setIzinHesapBilgisi(null);
       }
-    };
+    }, 500)
+  ).current;
+
+  // Form tarihlerini değiştiğinde izin hesabını güncelle
+  useEffect(() => {
+    const targetTcKimlik = creatingForPersonel?.tcKimlik || user?.PersonelTcKimlik?.toString();
     
-    hesaplaIzin();
+    if (formData.BaslangicTarihi && formData.BitisTarihi && targetTcKimlik) {
+      // Debounced fonksiyonu çağır - 500ms içinde tekrar değişirse iptal olur
+      debouncedCalculateIzin(targetTcKimlik, formData.BaslangicTarihi, formData.BitisTarihi);
+    } else {
+      setIzinHesapBilgisi(null);
+    }
+    
+    // Cleanup - component unmount olduğunda pending call'ları iptal et
+    return () => {
+      debouncedCalculateIzin.cancel();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.BaslangicTarihi, formData.BitisTarihi, user?.PersonelTcKimlik, creatingForPersonel]);
-
-  const fetchTalepler = async () => {
-    setLoading(true);
-    
-    // RLS otomatik olarak filtreliyor:
-    // - Saha personeli: Sadece kendi taleplerini görür
-    // - Koordinatör: Kendi bölgesindeki personellerin taleplerini görür
-    // - Yönetici/IK: Tüm talepleri görür
-    const query = supabase
-      .from('IzinTalepleri')
-      .select(`
-        *,
-        PersonelLevelizasyon!inner(
-          PersonelInfo(P_AdSoyad),
-          BolgeInfo(BolgeAdi, BolgeSicilNo),
-          BolgeID
-        )
-      `)
-      .order('created_at', { ascending: false });
-
-    const { data, error } = await query;
-
-    if (!error && data) {
-      // Veriyi düzelt
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const formattedData = data.map((item: any) => ({
-        ...item,
-        PersonelInfo: item.PersonelLevelizasyon?.PersonelInfo,
-        BolgeInfo: item.PersonelLevelizasyon?.BolgeInfo,
-      }));
-      setTalepler(formattedData);
-    }
-    setLoading(false);
-  };
 
   // Tatil günlerini tespit et (puantaj tablosundan)
   const fetchTatilGunleri = async (personelId: string, baslangic: string, bitis: string): Promise<string[]> => {
@@ -474,7 +438,7 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
       
-      fetchTalepler();
+      refreshTalepler();
       closeModal();
     }
   };
@@ -521,7 +485,7 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
 
-      fetchTalepler();
+      refreshTalepler();
       setOnayModalOpen(false);
       setSelectedTalep(null);
       setOnayFormData({ isApprove: true, not: '' });
@@ -583,7 +547,7 @@ function IzinTalepleriContent() {
           IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
         });
 
-        fetchTalepler();
+        refreshTalepler();
       }
     }
   };
@@ -636,7 +600,7 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
 
-      fetchTalepler();
+      refreshTalepler();
       setEditDateModalOpen(false);
       setSelectedTalep(null);
       setEditDateFormData({ BaslangicTarihi: '', BitisTarihi: '', DegisiklikNotu: '' });
@@ -725,22 +689,38 @@ function IzinTalepleriContent() {
     return false;
   };
 
-  const canCancel = (talep: FullIzinTalep) => {
+  const canCancel = useCallback((talep: FullIzinTalep) => {
     return user?.PersonelTcKimlik === talep.PersonelTcKimlik && 
            (talep.Durum === 'beklemede' || talep.Durum === 'koordinator_onay');
-  };
+  }, [user?.PersonelTcKimlik]);
 
-  const filteredTalepler = talepler.filter((talep) => {
-    const matchesSearch = 
-      talep.PersonelInfo?.P_AdSoyad?.toLowerCase().includes(searchTerm.toLowerCase());
+  // useMemo ile filtreleme işlemini cache'le - sadece gerektiğinde hesapla
+  const filteredTalepler = useMemo(() => {
+    if (!swrTalepler) return [];
     
-    const matchesDurum = filterDurum === 'all' || talep.Durum === filterDurum;
-    const matchesTur = filterTur === 'all' || talep.IzinTuru === filterTur;
+    return swrTalepler.filter((talep: FullIzinTalep) => {
+      const matchesSearch = searchTerm === '' || 
+        talep.PersonelInfo?.P_AdSoyad?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesDurum = filterDurum === 'all' || talep.Durum === filterDurum;
+      const matchesTur = filterTur === 'all' || talep.IzinTuru === filterTur;
 
-    return matchesSearch && matchesDurum && matchesTur;
-  });
+      return matchesSearch && matchesDurum && matchesTur;
+    });
+  }, [swrTalepler, searchTerm, filterDurum, filterTur]);
 
-  const isSahaPersoneli = user?.PersonelRole === 'saha_personeli';
+  const isSahaPersoneli = useMemo(() => 
+    user?.PersonelRole === 'saha_personeli', 
+    [user?.PersonelRole]
+  );
+
+  // Stat card değerlerini useMemo ile hesapla - sadece swrTalepler değişince hesapla
+  const stats = useMemo(() => ({
+    toplam: swrTalepler.length,
+    beklemede: swrTalepler.filter((t: FullIzinTalep) => t.Durum === 'beklemede').length,
+    onaylanan: swrTalepler.filter((t: FullIzinTalep) => t.Durum === 'yonetim_onay').length,
+    reddedilen: swrTalepler.filter((t: FullIzinTalep) => t.Durum === 'reddedildi').length
+  }), [swrTalepler]);
 
   return (
     <ProtectedRoute>
@@ -790,25 +770,25 @@ function IzinTalepleriContent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <StatCard
             title="Toplam Talep"
-            value={talepler.length}
+            value={stats.toplam}
             icon={Calendar}
             color="from-blue-500 to-cyan-500"
           />
           <StatCard
             title="Beklemede"
-            value={talepler.filter(t => t.Durum === 'beklemede').length}
+            value={stats.beklemede}
             icon={Clock}
             color="from-yellow-500 to-orange-500"
           />
           <StatCard
             title="Onaylanan"
-            value={talepler.filter(t => t.Durum === 'yonetim_onay').length}
+            value={stats.onaylanan}
             icon={CheckCircle}
             color="from-green-500 to-emerald-500"
           />
           <StatCard
             title="Reddedilen"
-            value={talepler.filter(t => t.Durum === 'reddedildi').length}
+            value={stats.reddedilen}
             icon={XCircle}
             color="from-red-500 to-pink-500"
           />
@@ -872,7 +852,7 @@ function IzinTalepleriContent() {
               Talep bulunamadı
             </div>
           ) : (
-            filteredTalepler.map((talep) => {
+            filteredTalepler.map((talep: FullIzinTalep) => {
               const Icon = getDurumIcon(talep.Durum);
               return (
                 <div key={talep.TalepID} className={`${isDark ? 'bg-gray-800 border-gray-700 hover:bg-gray-750' : 'bg-white border-gray-200 hover:bg-gray-50'} border rounded-2xl p-6 transition-all`}>
@@ -1339,7 +1319,7 @@ export default function IzinTalepleriPage() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function StatCard({ title, value, icon: Icon, color }: any) {
+const StatCard = memo(({ title, value, icon: Icon, color }: any) => {
   const { isDark } = useTheme();
   return (
     <div className={`${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border rounded-2xl p-6 transition-all hover:shadow-lg`}>
@@ -1352,7 +1332,9 @@ function StatCard({ title, value, icon: Icon, color }: any) {
       <p className={`${isDark ? 'text-gray-400' : 'text-gray-600'} text-sm`}>{title}</p>
     </div>
   );
-}
+});
+
+StatCard.displayName = 'StatCard';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function TalepDetayModal({ talep, onClose, getIzinTuruLabel, getDurumLabel }: any) {

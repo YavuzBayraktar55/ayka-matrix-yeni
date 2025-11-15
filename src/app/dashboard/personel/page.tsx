@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -11,6 +11,8 @@ import { Users, Plus, Edit, Trash2, Search, X, Eye, CalendarPlus, FileText } fro
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { usePersoneller } from '@/hooks/usePersoneller';
+import { useBolgeler } from '@/hooks/useBolgeler';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +25,25 @@ export default function PersonelPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
   const router = useRouter();
-  const [personeller, setPersoneller] = useState<FullPersonel[]>([]);
-  const [bolgeler, setBolgeler] = useState<BolgeInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  // SWR ile data fetching - otomatik caching ve revalidation
+  const { 
+    personeller, 
+    isLoading: loadingPersoneller, 
+    mutate: refreshPersoneller 
+  } = usePersoneller({
+    userEmail: user?.PersonelEmail || '',
+    userRole: user?.PersonelRole || '',
+    enabled: !!(user?.PersonelEmail && user?.PersonelRole)
+  });
+
+  const { 
+    bolgeler, 
+    isLoading: loadingBolgeler 
+  } = useBolgeler();
+
+  const loading = loadingPersoneller || loadingBolgeler;
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterRole, setFilterRole] = useState<string>('all');
   const [filterAktif, setFilterAktif] = useState<string>('all');
@@ -76,68 +94,7 @@ export default function PersonelPage() {
     P_Sube: '',
   });
 
-  useEffect(() => {
-    fetchPersoneller();
-    fetchBolgeler();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const fetchBolgeler = async () => {
-    const supabase = createClient();
-    const { data, error } = await supabase
-      .from('BolgeInfo')
-      .select('*')
-      .order('BolgeAdi', { ascending: true });
-
-    if (!error && data) {
-      console.log('🗺️ Bölgeler Yüklendi:', data);
-      setBolgeler(data);
-    } else {
-      console.error('❌ Bölge yükleme hatası:', error);
-    }
-  };
-
-  const fetchPersoneller = async () => {
-    if (!user?.PersonelEmail || !user?.PersonelRole) {
-      console.error('❌ User bilgisi eksik');
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    
-    try {
-      // API route üzerinden veri çek - RLS bypass ile
-      const response = await fetch(
-        `/api/personel?userEmail=${encodeURIComponent(user.PersonelEmail)}&userRole=${encodeURIComponent(user.PersonelRole)}`
-      );
-
-      if (!response.ok) {
-        throw new Error('API request failed');
-      }
-
-      const result = await response.json();
-
-      if (result.error) {
-        console.error('❌ API Error:', result.error);
-        setPersoneller([]);
-      } else {
-        console.log('✅ Personel Verisi Geldi:', result.data);
-        console.log('📊 Personel Sayısı:', result.count);
-        console.log('🗺️ Bölge Bilgileri:', result.data.map((p: FullPersonel) => ({ 
-          ad: p.PersonelInfo?.P_AdSoyad, 
-          bolgeID: p.BolgeID, 
-          bolgeAdi: p.BolgeInfo?.BolgeAdi 
-        })));
-        setPersoneller(result.data || []);
-      }
-    } catch (error) {
-      console.error('❌ Fetch hatası:', error);
-      setPersoneller([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // SWR otomatik data fetching yapıyor - manuel fetch fonksiyonlarına gerek yok
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +158,7 @@ export default function PersonelPage() {
         .eq('PersonelTcKimlik', editingPersonel.PersonelTcKimlik);
 
       if (!error1 && !error2) {
-        fetchPersoneller();
+        refreshPersoneller();
         closeModal();
       }
     } else {
@@ -216,7 +173,7 @@ export default function PersonelPage() {
           .insert([personelInfoData]);
 
         if (!error2) {
-          fetchPersoneller();
+          refreshPersoneller();
           closeModal();
         }
       }
@@ -271,7 +228,7 @@ export default function PersonelPage() {
         .eq('PersonelTcKimlik', tc);
 
       if (!error) {
-        fetchPersoneller();
+        refreshPersoneller();
       }
     }
   };
@@ -294,7 +251,7 @@ export default function PersonelPage() {
       .eq('PersonelTcKimlik', personel.PersonelTcKimlik);
 
     if (!error) {
-      fetchPersoneller();
+      refreshPersoneller();
     }
   };
 
@@ -397,7 +354,7 @@ export default function PersonelPage() {
     return colors[role] || 'from-gray-500 to-gray-600';
   };
 
-  const filteredPersoneller = personeller.filter((personel) => {
+  const filteredPersoneller = personeller.filter((personel: FullPersonel) => {
     const matchesSearch = 
       personel.PersonelInfo?.P_AdSoyad?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       personel.PersonelEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -513,7 +470,7 @@ export default function PersonelPage() {
                     className={`w-full px-4 py-3 ${isDark ? 'bg-gray-900 border-gray-700 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500`}
                   >
                     <option value="all">Tüm Bölgeler</option>
-                    {bolgeler.map((bolge) => (
+                    {bolgeler.map((bolge: BolgeInfo) => (
                       <option key={bolge.BolgeID} value={bolge.BolgeID.toString()}>
                         {bolge.BolgeAdi}
                       </option>
@@ -596,7 +553,7 @@ export default function PersonelPage() {
                       </td>
                     </tr>
                   ) : (
-                    filteredPersoneller.map((personel) => (
+                    filteredPersoneller.map((personel: FullPersonel) => (
                       <tr 
                         key={personel.PersonelTcKimlik} 
                         className={`

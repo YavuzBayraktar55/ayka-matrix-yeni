@@ -20,6 +20,14 @@ export function createClient() {
         persistSession: true,
         detectSessionInUrl: false,
         flowType: 'implicit'
+      },
+      global: {
+        headers: {
+          'x-application-name': 'ayka-matrix'
+        }
+      },
+      db: {
+        schema: 'public'
       }
     }
   );

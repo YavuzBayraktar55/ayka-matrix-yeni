@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState, useEffect, useMemo, memo } from 'react';
 import { createPortal } from 'react-dom';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
@@ -10,6 +10,7 @@ import { DollarSign, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle, 
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { useAvansTalepleri } from '@/hooks/useAvansTalepleri';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +29,17 @@ interface FullAvansTalep extends AvansTalepleri {
 export default function AvansTalepleriPage() {
   const { user } = useAuth();
   const { isDark } = useTheme();
-  const [talepler, setTalepler] = useState<FullAvansTalep[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  // SWR ile data fetching
+  const { 
+    talepler: swrTalepler, 
+    isLoading: loading, 
+    mutate: refreshTalepler 
+  } = useAvansTalepleri({
+    userEmail: user?.PersonelEmail || '',
+    userRole: user?.PersonelRole || '',
+    enabled: !!(user?.PersonelEmail && user?.PersonelRole)
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDurum, setFilterDurum] = useState<string>('all');
   const [modalOpen, setModalOpen] = useState(false);
@@ -49,43 +59,6 @@ export default function AvansTalepleriPage() {
     odemeTarihi: '',
   });
 
-  useEffect(() => {
-    fetchTalepler();
-  }, []);
-
-  const fetchTalepler = async () => {
-    setLoading(true);
-    
-    // RLS otomatik olarak filtreliyor:
-    // - Saha personeli: Sadece kendi taleplerini görür
-    // - Koordinatör: Kendi bölgesindeki personellerin taleplerini görür
-    // - Yönetici/IK: Tüm talepleri görür
-    const query = supabase
-      .from('AvansTalepleri')
-      .select(`
-        *,
-        PersonelLevelizasyon!inner(
-          PersonelInfo(P_AdSoyad),
-          BolgeInfo(BolgeAdi),
-          BolgeID
-        )
-      `)
-      .order('created_at', { ascending: false });
-
-    const { data, error } = await query;
-
-    if (!error && data) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const formattedData = data.map((item: any) => ({
-        ...item,
-        PersonelInfo: item.PersonelLevelizasyon?.PersonelInfo,
-        BolgeInfo: item.PersonelLevelizasyon?.BolgeInfo,
-      }));
-      setTalepler(formattedData);
-    }
-    setLoading(false);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -102,7 +75,7 @@ export default function AvansTalepleriPage() {
     const { error } = await supabase.from('AvansTalepleri').insert([talepData]);
 
     if (!error) {
-      fetchTalepler();
+      refreshTalepler();
       closeModal();
     }
   };
@@ -134,7 +107,7 @@ export default function AvansTalepleriPage() {
       .eq('TalepID', selectedTalep.TalepID);
 
     if (!error) {
-      fetchTalepler();
+      refreshTalepler();
       setOnayModalOpen(false);
       setSelectedTalep(null);
       setOnayFormData({ isApprove: true, not: '', odemeTarihi: '' });
@@ -183,7 +156,7 @@ export default function AvansTalepleriPage() {
         .eq('TalepID', talep.TalepID);
 
       if (!error) {
-        fetchTalepler();
+        refreshTalepler();
       }
     }
   };
@@ -246,20 +219,39 @@ export default function AvansTalepleriPage() {
            (talep.Durum === 'beklemede' || talep.Durum === 'koordinator_onay');
   };
 
-  const filteredTalepler = talepler.filter((talep) => {
-    const matchesSearch = 
-      talep.PersonelInfo?.P_AdSoyad?.toLowerCase().includes(searchTerm.toLowerCase());
+  // useMemo ile filtrelemeyi optimize et
+  const filteredTalepler = useMemo(() => {
+    if (!swrTalepler) return [];
     
-    const matchesDurum = filterDurum === 'all' || talep.Durum === filterDurum;
+    return swrTalepler.filter((talep: FullAvansTalep) => {
+      const matchesSearch = searchTerm === '' || 
+        talep.PersonelInfo?.P_AdSoyad?.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesDurum = filterDurum === 'all' || talep.Durum === filterDurum;
 
-    return matchesSearch && matchesDurum;
-  });
+      return matchesSearch && matchesDurum;
+    });
+  }, [swrTalepler, searchTerm, filterDurum]);
 
-  const isSahaPersoneli = user?.PersonelRole === 'saha_personeli';
+  const isSahaPersoneli = useMemo(() => 
+    user?.PersonelRole === 'saha_personeli',
+    [user?.PersonelRole]
+  );
 
-  const toplamAvans = filteredTalepler
-    .filter(t => t.Durum === 'yonetim_onay')
-    .reduce((sum, t) => sum + t.AvansMiktari, 0);
+  // Stat değerlerini useMemo ile hesapla
+  const stats = useMemo(() => {
+    const toplamAvans = filteredTalepler
+      .filter((t: FullAvansTalep) => t.Durum === 'yonetim_onay')
+      .reduce((sum: number, t: FullAvansTalep) => sum + t.AvansMiktari, 0);
+
+    return {
+      toplam: swrTalepler.length,
+      beklemede: swrTalepler.filter((t: FullAvansTalep) => t.Durum === 'beklemede').length,
+      onaylanan: swrTalepler.filter((t: FullAvansTalep) => t.Durum === 'yonetim_onay').length,
+      reddedilen: swrTalepler.filter((t: FullAvansTalep) => t.Durum === 'reddedildi').length,
+      toplamAvans
+    };
+  }, [swrTalepler, filteredTalepler]);
 
   return (
     <ProtectedRoute>
@@ -295,25 +287,25 @@ export default function AvansTalepleriPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
           <StatCard
             title="Toplam Talep"
-            value={talepler.length}
+            value={stats.toplam}
             icon={DollarSign}
             color="from-blue-500 to-cyan-500"
           />
           <StatCard
             title="Beklemede"
-            value={talepler.filter(t => t.Durum === 'beklemede').length}
+            value={stats.beklemede}
             icon={Clock}
             color="from-yellow-500 to-orange-500"
           />
           <StatCard
             title="Onaylanan"
-            value={talepler.filter(t => t.Durum === 'yonetim_onay').length}
+            value={stats.onaylanan}
             icon={CheckCircle}
             color="from-green-500 to-emerald-500"
           />
           <StatCard
             title="Reddedilen"
-            value={talepler.filter(t => t.Durum === 'reddedildi').length}
+            value={stats.reddedilen}
             icon={XCircle}
             color="from-red-500 to-pink-500"
           />
@@ -330,7 +322,7 @@ export default function AvansTalepleriPage() {
               'text-2xl font-bold mb-1',
               isDark ? 'text-white' : 'text-gray-900'
             )}>
-              {toplamAvans.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
+              {stats.toplamAvans.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺
             </h3>
             <p className={isDark ? 'text-gray-400 text-sm' : 'text-gray-600 text-sm'}>Toplam Avans</p>
           </div>
@@ -402,7 +394,7 @@ export default function AvansTalepleriPage() {
               Talep bulunamadı
             </div>
           ) : (
-            filteredTalepler.map((talep) => {
+            filteredTalepler.map((talep: FullAvansTalep) => {
               const Icon = getDurumIcon(talep.Durum);
               return (
                 <div key={talep.TalepID} className={cn(
@@ -654,7 +646,7 @@ export default function AvansTalepleriPage() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function StatCard({ title, value, icon: Icon, color }: any) {
+const StatCard = memo(({ title, value, icon: Icon, color }: any) => {
   const { isDark } = useTheme();
   
   return (
@@ -677,7 +669,9 @@ function StatCard({ title, value, icon: Icon, color }: any) {
       )}>{title}</p>
     </div>
   );
-}
+});
+
+StatCard.displayName = 'StatCard';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function TalepDetayModal({ talep, onClose, getDurumLabel, isDark }: any) {

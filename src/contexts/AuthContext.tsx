@@ -127,13 +127,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, session) => {
       // Sadece gerçek auth değişikliklerinde işlem yap
       if (event === 'SIGNED_IN' && session?.user) {
-        loadUserData(session.user.email!);
+        // Eğer zaten yükleme yapılıyorsa, bekle
+        if (!loadingRef.current) {
+          loadUserData(session.user.email!);
+        }
       } else if (event === 'SIGNED_OUT') {
         setUser(null);
         setLoading(false);
         loadingRef.current = false;
       }
-      // TOKEN_REFRESHED, USER_UPDATED gibi diğer eventleri ignore et
+      // TOKEN_REFRESHED, USER_UPDATED, INITIAL_SESSION gibi diğer eventleri ignore et
+      // Bu sayede gereksiz re-fetch'ler önlenir
     });
 
     return () => subscription.unsubscribe();
