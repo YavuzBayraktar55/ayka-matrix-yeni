@@ -147,27 +147,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
     },
     {
-      name: 'Evraklar',
-      icon: FileText,
-      href: '/dashboard/evraklar',
-      roles: ['koordinator', 'insan_kaynaklari', 'yonetici']
-    },
-    {
-      name: 'Şablonlar',
+      name: 'Şablon Yönetimi',
       icon: FileText,
       href: '/dashboard/sablonlar',
-      roles: ['insan_kaynaklari', 'yonetici']
-    },
-    {
-      name: 'Şablon Düzenleyici (Eski)',
-      icon: FileText,
-      href: '/dashboard/sablon-duzenleyici',
-      roles: ['insan_kaynaklari', 'yonetici']
-    },
-    {
-      name: '📝 Word Şablon Düzenleyici',
-      icon: FileText,
-      href: '/dashboard/yeni-sablon-duzenleyici',
       roles: ['insan_kaynaklari', 'yonetici']
     },
   ];

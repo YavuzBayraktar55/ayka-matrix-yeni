@@ -6,7 +6,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { createClient } from '@/lib/supabase/client';
 import { AvansTalepleri, TalepDurum } from '@/types/database';
-import { DollarSign, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
+import { DollarSign, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -138,6 +138,40 @@ export default function AvansTalepleriPage() {
       setOnayModalOpen(false);
       setSelectedTalep(null);
       setOnayFormData({ isApprove: true, not: '', odemeTarihi: '' });
+    }
+  };
+
+  const handlePrintAvans = async (talep: FullAvansTalep) => {
+    try {
+      const response = await fetch('/api/avans-belgesi-olustur', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          talepId: talep.TalepID.toString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.error || 'Avans belgesi oluşturulamadı');
+        return;
+      }
+
+      // Word dosyasını indir
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `avans_${talep.PersonelInfo?.P_AdSoyad || talep.PersonelTcKimlik}_${talep.TalepID}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Avans belgesi oluşturma hatası:', error);
+      alert('Avans belgesi oluşturulurken bir hata oluştu');
     }
   };
 
@@ -527,6 +561,24 @@ export default function AvansTalepleriPage() {
                           </button>
                         </>
                       )}
+
+                      {/* Avans Belgesi Yazdır - Koordinatör, İK ve Yönetici */}
+                      {(user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'insan_kaynaklari' || user?.PersonelRole === 'yonetici') && (
+                        <button
+                          onClick={() => handlePrintAvans(talep)}
+                          className={cn(
+                            'px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 justify-center',
+                            isDark
+                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                              : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                          )}
+                          title="Avans Belgesi Yazdır"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Belge Yazdır
+                        </button>
+                      )}
+
                       {canCancel(talep) && (
                         <button
                           onClick={() => handleIptal(talep)}

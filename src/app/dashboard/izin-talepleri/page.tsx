@@ -7,7 +7,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import DashboardLayout from '@/components/DashboardLayout';
 import { createClient } from '@/lib/supabase/client';
 import { IzinTalepleri, IzinTuru, TalepDurum, IzinTalepGecmis } from '@/types/database';
-import { Calendar, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle, History, Edit3 } from 'lucide-react';
+import { Calendar, Plus, X, Search, Clock, CheckCircle, XCircle, AlertCircle, History, Edit3, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -528,6 +528,40 @@ function IzinTalepleriContent() {
     }
   };
 
+  const handlePrintIzin = async (talep: FullIzinTalep) => {
+    try {
+      const response = await fetch('/api/izin-belgesi-olustur', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          talepId: talep.TalepID.toString(),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        alert(error.error || 'İzin belgesi oluşturulamadı');
+        return;
+      }
+
+      // Word dosyasını indir
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `izin_${talep.PersonelInfo?.P_AdSoyad || talep.PersonelTcKimlik}_${talep.TalepID}.docx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('İzin belgesi oluşturma hatası:', error);
+      alert('İzin belgesi oluşturulurken bir hata oluştu');
+    }
+  };
+
   const handleIptal = async (talep: FullIzinTalep) => {
     if (!user) return;
     
@@ -986,6 +1020,23 @@ function IzinTalepleriContent() {
                         <History className="w-4 h-4" />
                         Geçmiş
                       </button>
+
+                      {/* İzin Belgesi Yazdır - Koordinatör, İK ve Yönetici */}
+                      {(user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'insan_kaynaklari' || user?.PersonelRole === 'yonetici') && (
+                        <button
+                          onClick={() => handlePrintIzin(talep)}
+                          className={cn(
+                            'px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 justify-center',
+                            isDark
+                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30'
+                              : 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                          )}
+                          title="İzin Belgesi Yazdır"
+                        >
+                          <FileText className="w-4 h-4" />
+                          Belge Yazdır
+                        </button>
+                      )}
 
                       {canCancel(talep) && (
                         <button
