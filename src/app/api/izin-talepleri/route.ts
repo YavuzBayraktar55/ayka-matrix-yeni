@@ -68,7 +68,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(formattedData, {
       headers: {
-        'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
       },
     });
   } catch (error) {

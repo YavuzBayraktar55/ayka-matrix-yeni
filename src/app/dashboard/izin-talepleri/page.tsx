@@ -44,6 +44,20 @@ function IzinTalepleriContent() {
     userRole: user?.PersonelRole || '',
     enabled: !!(user?.PersonelEmail && user?.PersonelRole)
   });
+
+  // Debug: SWR data değişimini izle (sadece development)
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📊 SWR Data güncellendi:', {
+        talepSayisi: swrTalepler.length,
+        beklemede: swrTalepler.filter(t => t.Durum === 'beklemede').length,
+        onaylanan: swrTalepler.filter(t => t.Durum === 'yonetim_onay').length,
+        reddedilen: swrTalepler.filter(t => t.Durum === 'reddedildi').length,
+        ilkTalep: swrTalepler[0]?.TalepID,
+      });
+    }
+  }, [swrTalepler]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDurum, setFilterDurum] = useState<string>('all');
   const [filterTur, setFilterTur] = useState<string>('all');
@@ -164,42 +178,52 @@ function IzinTalepleriContent() {
       console.log('📅 Kontrol edilecek aylar:', Array.from(aylar));
       
       // Kullanıcının BolgeID'sini al
-      console.log('🔍 Personel TC sorgulanıyor:', { 
-        personelId, 
-        type: typeof personelId,
-        value: personelId,
-        asNumber: Number(personelId)
-      });
+      // Not: PersonelTcKimlik bigint tipinde, string olarak sorgulamak daha güvenli
       
-      // PersonelTcKimlik bigint olabilir, number'a çevir
-      const tcAsNumber = typeof personelId === 'string' ? Number(personelId) : personelId;
-      
-      // .single() yerine .maybeSingle() kullan - birden fazla kayıt varsa hata vermez
-      const { data: userData, error: userError } = await supabase
-        .from('PersonelLevelizasyon')
-        .select('BolgeID, PersonelTcKimlik, PersonelInfo(P_AdSoyad)')
-        .eq('PersonelTcKimlik', tcAsNumber)
-        .maybeSingle();
-      
-      console.log('👤 Kullanıcı bilgisi:', { 
-        personelId, 
-        userData, 
-        userError,
-        errorDetails: userError?.message,
-        errorHint: userError?.hint
-      });
-      
-      if (!userData?.BolgeID) {
-        console.error('❌ Personel bölge bilgisi bulunamadı:', {
-          personelId,
-          userData,
-          error: userError?.message
-        });
-        // Bölge bilgisi bulunamadığında boş array döndür (tatil yok demek)
-        console.warn('⚠️ Bölge bilgisi olmadan devam ediliyor - tatil günleri hesaplanamayacak');
+      // Önce giriş yapan kullanıcının bilgilerini al (RLS için)
+      const currentUserEmail = user?.PersonelEmail;
+      if (!currentUserEmail) {
+        console.error('❌ Giriş yapan kullanıcı bulunamadı');
+        return [];
+      }
+
+      // API endpoint üzerinden sorgula (RLS bypass için service role kullanacak)
+      const response = await fetch(`/api/personel?userEmail=${encodeURIComponent(currentUserEmail)}&userRole=${user?.PersonelRole || 'saha_personeli'}`);
+      if (!response.ok) {
+        console.error('❌ Personel listesi alınamadı');
         return [];
       }
       
+      const result = await response.json();
+      const allPersonel = result.data || [];
+      
+      console.log('📋 API\'den gelen personel verisi:', {
+        totalCount: allPersonel.length,
+        arananTC: personelId,
+        ilkPersonel: allPersonel[0]?.PersonelTcKimlik
+      });
+      
+      // İlgili personeli bul
+      const targetPersonel = allPersonel.find((p: { PersonelTcKimlik: number | string }) => {
+        const pTc = p.PersonelTcKimlik?.toString();
+        const targetTc = personelId?.toString();
+        return pTc === targetTc;
+      });
+
+      if (!targetPersonel?.BolgeID) {
+        console.warn('⚠️ Personel bölge bilgisi bulunamadı:', {
+          personelId,
+          found: !!targetPersonel,
+          bolgeID: targetPersonel?.BolgeID
+        });
+        return [];
+      }
+
+      const userData = {
+        BolgeID: targetPersonel.BolgeID,
+        PersonelTcKimlik: targetPersonel.PersonelTcKimlik
+      };
+
       // Tatil günlerini tespit et
       const tatilGunleri: string[] = [];
       
@@ -250,6 +274,7 @@ function IzinTalepleriContent() {
       
       console.log('✅ Toplam tatil günleri:', tatilGunleri);
       return tatilGunleri;
+      
     } catch (error) {
       console.error('❌ Tatil günleri alınırken hata:', error);
       return [];
@@ -438,42 +463,73 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
       
-      refreshTalepler();
+      // Optimistic update: Yeni talebi listeye ekle
+      await refreshTalepler(
+        (currentData) => {
+          if (!currentData) return [data];
+          return [data, ...currentData]; // En üste ekle
+        },
+        { revalidate: true }
+      );
       closeModal();
     }
   };
 
   const handleOnayReddet = async () => {
-    if (!selectedTalep || !user) return;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: any = {
-      updated_at: new Date().toISOString(),
-    };
-
-    let yeniDurum: TalepDurum = selectedTalep.Durum;
-    let islemTipi: 'koordinator_onay' | 'yonetim_onay' | 'reddedildi' = 'koordinator_onay';
-
-    if (user?.PersonelRole === 'koordinator') {
-      yeniDurum = onayFormData.isApprove ? 'koordinator_onay' : 'reddedildi';
-      updateData.Durum = yeniDurum;
-      updateData.KoordinatorNotu = onayFormData.not;
-      updateData.KoordinatorOnayTarihi = new Date().toISOString();
-      islemTipi = onayFormData.isApprove ? 'koordinator_onay' : 'reddedildi';
-    } else if (user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') {
-      yeniDurum = onayFormData.isApprove ? 'yonetim_onay' : 'reddedildi';
-      updateData.Durum = yeniDurum;
-      updateData.YonetimNotu = onayFormData.not;
-      updateData.YonetimOnayTarihi = new Date().toISOString();
-      islemTipi = onayFormData.isApprove ? 'yonetim_onay' : 'reddedildi';
+    if (!selectedTalep || !user) {
+      console.error('❌ handleOnayReddet: Eksik veri', { selectedTalep, user: !!user });
+      return;
     }
 
-    const { error } = await supabase
-      .from('IzinTalepleri')
-      .update(updateData)
-      .eq('TalepID', selectedTalep.TalepID);
+    console.log('🔄 Onay/Red işlemi başlıyor:', {
+      talepId: selectedTalep.TalepID,
+      isApprove: onayFormData.isApprove,
+      userRole: user.PersonelRole,
+      not: onayFormData.not
+    });
 
-    if (!error) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updateData: any = {
+        updated_at: new Date().toISOString(),
+      };
+
+      let yeniDurum: TalepDurum = selectedTalep.Durum;
+      let islemTipi: 'koordinator_onay' | 'yonetim_onay' | 'reddedildi' = 'koordinator_onay';
+
+      if (user?.PersonelRole === 'koordinator') {
+        yeniDurum = onayFormData.isApprove ? 'koordinator_onay' : 'reddedildi';
+        updateData.Durum = yeniDurum;
+        updateData.KoordinatorNotu = onayFormData.not;
+        updateData.KoordinatorOnayTarihi = new Date().toISOString();
+        islemTipi = onayFormData.isApprove ? 'koordinator_onay' : 'reddedildi';
+      } else if (user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') {
+        yeniDurum = onayFormData.isApprove ? 'yonetim_onay' : 'reddedildi';
+        updateData.Durum = yeniDurum;
+        updateData.YonetimNotu = onayFormData.not;
+        updateData.YonetimOnayTarihi = new Date().toISOString();
+        islemTipi = onayFormData.isApprove ? 'yonetim_onay' : 'reddedildi';
+      }
+
+      console.log('📝 Update data hazırlandı:', { yeniDurum, islemTipi, updateData });
+
+      const { data: updateResult, error } = await supabase
+        .from('IzinTalepleri')
+        .update(updateData)
+        .eq('TalepID', selectedTalep.TalepID)
+        .select();
+
+      if (error) {
+        console.error('❌ Supabase update hatası:', error);
+        alert('İşlem sırasında hata oluştu: ' + error.message);
+        return;
+      }
+
+      console.log('✅ Supabase update başarılı:', { 
+        updateCount: updateResult?.length, 
+        updatedData: updateResult?.[0] 
+      });
+
       // Geçmişe kaydet
       await saveGecmis({
         TalepID: selectedTalep.TalepID,
@@ -485,10 +541,33 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
 
-      refreshTalepler();
+      console.log('✅ Geçmiş kaydedildi');
+
+      console.log('🔄 SWR optimistic update yapılıyor...');
+      
+      // Optimistic update: Local state'i hemen güncelle
+      await refreshTalepler(
+        (currentData) => {
+          if (!currentData) return currentData;
+          return currentData.map(t => 
+            t.TalepID === selectedTalep.TalepID 
+              ? { ...t, Durum: yeniDurum, ...updateData }
+              : t
+          );
+        },
+        { revalidate: false } // İlk başta revalidate etme
+      );
+      
+      console.log('✅ Liste kalıcı olarak güncellendi (optimistic update)');
+      
       setOnayModalOpen(false);
       setSelectedTalep(null);
       setOnayFormData({ isApprove: true, not: '' });
+      
+      console.log('✅ Onay/Red işlemi tamamlandı');
+    } catch (err) {
+      console.error('❌ handleOnayReddet genel hata:', err);
+      alert('İşlem sırasında beklenmeyen bir hata oluştu');
     }
   };
 
@@ -547,7 +626,18 @@ function IzinTalepleriContent() {
           IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
         });
 
-        refreshTalepler();
+        // Optimistic update: Talebin durumunu güncelle
+        await refreshTalepler(
+          (currentData) => {
+            if (!currentData) return currentData;
+            return currentData.map(t => 
+              t.TalepID === talep.TalepID 
+                ? { ...t, Durum: 'iptal', updated_at: new Date().toISOString() }
+                : t
+            );
+          },
+          { revalidate: true }
+        );
       }
     }
   };
@@ -600,7 +690,24 @@ function IzinTalepleriContent() {
         IslemYapanAd: user.PersonelInfo?.P_AdSoyad,
       });
 
-      refreshTalepler();
+      // Optimistic update: Tarih ve gün sayısını güncelle
+      await refreshTalepler(
+        (currentData) => {
+          if (!currentData) return currentData;
+          return currentData.map(t => 
+            t.TalepID === selectedTalep.TalepID 
+              ? { 
+                  ...t, 
+                  BaslangicTarihi: editDateFormData.BaslangicTarihi,
+                  BitisTarihi: editDateFormData.BitisTarihi,
+                  GunSayisi: yeniGunSayisi,
+                  updated_at: new Date().toISOString()
+                }
+              : t
+          );
+        },
+        { revalidate: true }
+      );
       setEditDateModalOpen(false);
       setSelectedTalep(null);
       setEditDateFormData({ BaslangicTarihi: '', BitisTarihi: '', DegisiklikNotu: '' });
