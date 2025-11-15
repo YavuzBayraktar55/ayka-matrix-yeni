@@ -143,6 +143,34 @@ export async function POST(request: NextRequest) {
     const onBirGunSonra = new Date(bugun);
     onBirGunSonra.setDate(onBirGunSonra.getDate() + 11);
 
+    // Sözleşme başlangıç tarihine göre yıl sonu ve sonraki yılların tarihlerini hesapla
+    const sozlesmeBaslangic = personelInfo.P_AykaSozlesmeTarihi ? new Date(personelInfo.P_AykaSozlesmeTarihi) : null;
+    let sozlesmeBaslangicYilSon = '';
+    let sozlesmeBaslangicYil2Bas = '';
+    let sozlesmeBaslangicYil2Son = '';
+    let sozlesmeBaslangicYil3Bas = '';
+    let sozlesmeBaslangicYil3Son = '';
+
+    if (sozlesmeBaslangic) {
+      const baslangicYil = sozlesmeBaslangic.getFullYear();
+      
+      // Sözleşme başlangıç yılının son günü
+      const yilSon = new Date(baslangicYil, 11, 31);
+      sozlesmeBaslangicYilSon = formatDate(yilSon);
+      
+      // 2. yıl başlangıç ve bitiş
+      const yil2Bas = new Date(baslangicYil + 1, 0, 1);
+      const yil2Son = new Date(baslangicYil + 1, 11, 31);
+      sozlesmeBaslangicYil2Bas = formatDate(yil2Bas);
+      sozlesmeBaslangicYil2Son = formatDate(yil2Son);
+      
+      // 3. yıl başlangıç ve bitiş
+      const yil3Bas = new Date(baslangicYil + 2, 0, 1);
+      const yil3Son = new Date(baslangicYil + 2, 11, 31);
+      sozlesmeBaslangicYil3Bas = formatDate(yil3Bas);
+      sozlesmeBaslangicYil3Son = formatDate(yil3Son);
+    }
+
     // Değişkenleri hazırla
     const data = {
       // Personel Bilgileri (PersonelInfo tablosundan)
@@ -214,6 +242,13 @@ export async function POST(request: NextRequest) {
       sozlesme_tarihi: formatDate(personelInfo.P_AykaSozlesmeTarihi),
       sozlesme_baslangic: formatDate(personelInfo.P_AykaSozlesmeTarihi),
       sozlesme_bitis: '', // Belirsiz süreli için boş
+      
+      // Sözleşme başlangıcına göre hesaplanan tarihler
+      sozlesme_baslangic_yil_son: sozlesmeBaslangicYilSon,
+      sozlesme_baslangic_yil2_bas: sozlesmeBaslangicYil2Bas,
+      sozlesme_baslangic_yil2_son: sozlesmeBaslangicYil2Son,
+      sozlesme_baslangic_yil3_bas: sozlesmeBaslangicYil3Bas,
+      sozlesme_baslangic_yil3_son: sozlesmeBaslangicYil3Son,
       
       // Şirket Bilgileri
       sirket_adi: 'AY-KA DOĞALGAZ ENERJİ GIDA TURZ. SOFRA ve TAAHHÜT HİZ. SAN. TİC. LTD. ŞTİ.',

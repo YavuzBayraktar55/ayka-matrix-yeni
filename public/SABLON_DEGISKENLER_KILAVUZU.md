@@ -142,6 +142,18 @@ Bazı değişkenler veritabanında BÜYÜK HARF olarak saklanır. Bunları düzg
 | `{sozlesme_baslangic}` | Sözleşme başlangıç tarihi | 01/03/2020 |
 | `{sozlesme_bitis}` | Sözleşme bitiş tarihi | (Belirsiz süreli için boş) |
 
+### Sözleşme Başlangıcına Göre Otomatik Hesaplanan Tarihler
+
+**Not:** Bu değişkenler `{sozlesme_baslangic}` tarihine göre otomatik hesaplanır.
+
+| Değişken | Açıklama | Örnek (sozlesme_baslangic: 01/03/2020) |
+|----------|----------|-------------|
+| `{sozlesme_baslangic_yil_son}` | Sözleşme başlangıç yılının son günü | 31/12/2020 |
+| `{sozlesme_baslangic_yil2_bas}` | 2. yıl başlangıcı | 01/01/2021 |
+| `{sozlesme_baslangic_yil2_son}` | 2. yıl bitişi | 31/12/2021 |
+| `{sozlesme_baslangic_yil3_bas}` | 3. yıl başlangıcı | 01/01/2022 |
+| `{sozlesme_baslangic_yil3_son}` | 3. yıl bitişi | 31/12/2022 |
+
 ### Belge Tarihleri
 
 | Değişken | Açıklama | Örnek Değer |
