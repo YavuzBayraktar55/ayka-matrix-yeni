@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
+import { formatDate, toTitleCase, formatTcNo, getIzinTuruLabel } from '@/lib/helpers/formatters';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,50 +11,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 // Service role client - RLS'i bypass eder
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-// Helper: Tarih formatla
-function formatDate(date: string | Date | null): string {
-  if (!date) return '';
-  const d = new Date(date);
-  return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-// Helper: String'i düzgün formata çevir (her kelimenin ilk harfi büyük)
-function toTitleCase(str: string | number | null): string {
-  if (!str) return '';
-  const strValue = String(str);
-  
-  // Türkçe karakterler için özel işlem
-  return strValue
-    .toLocaleLowerCase('tr-TR')
-    .split(' ')
-    .map(word => {
-      if (word.length === 0) return word;
-      // İlk harfi Türkçe locale ile büyük yap
-      const firstChar = word.charAt(0).toLocaleUpperCase('tr-TR');
-      const restOfWord = word.slice(1);
-      return firstChar + restOfWord;
-    })
-    .join(' ');
-}
-
-// Helper: TC No formatla (123 456 789 01)
-function formatTcNo(tc: string | number | null): string {
-  if (!tc) return '';
-  const tcStr = String(tc);
-  return tcStr.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1 $2 $3 $4');
-}
-
-// Helper: İzin türü Türkçe'ye çevir
-function getIzinTuruLabel(tur: string): string {
-  const labels: Record<string, string> = {
-    'yillik': 'Yıllık İzin',
-    'ucretli': 'Ücretli İzin',
-    'ucretsiz': 'Ücretsiz İzin',
-    'raporlu': 'Raporlu İzin (Hastalık)'
-  };
-  return labels[tur] || tur;
-}
 
 export async function POST(request: NextRequest) {
   try {

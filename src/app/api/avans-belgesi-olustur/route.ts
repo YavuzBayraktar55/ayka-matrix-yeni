@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
+import { formatDate, toTitleCase, formatTcNo, formatCurrency, numberToWords } from '@/lib/helpers/formatters';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,89 +11,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 // Service role client - RLS'i bypass eder
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
-
-// Helper: Tarih formatla
-function formatDate(date: string | Date | null): string {
-  if (!date) return '';
-  const d = new Date(date);
-  return d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-// Helper: Para formatla
-function formatCurrency(amount: number | null): string {
-  if (!amount) return '0,00 TL';
-  return new Intl.NumberFormat('tr-TR', {
-    style: 'currency',
-    currency: 'TRY'
-  }).format(amount);
-}
-
-// Helper: Sayıyı yazıya çevir (basit versiyon)
-function numberToWords(num: number): string {
-  if (num === 0) return 'Sıfır';
-  
-  const ones = ['', 'Bir', 'İki', 'Üç', 'Dört', 'Beş', 'Altı', 'Yedi', 'Sekiz', 'Dokuz'];
-  const tens = ['', 'On', 'Yirmi', 'Otuz', 'Kırk', 'Elli', 'Altmış', 'Yetmiş', 'Seksen', 'Doksan'];
-  const hundreds = ['', 'Yüz', 'İkiyüz', 'Üçyüz', 'Dörtyüz', 'Beşyüz', 'Altıyüz', 'Yediyüz', 'Sekizyüz', 'Dokuzyüz'];
-  
-  let result = '';
-  
-  // Binler
-  const thousands = Math.floor(num / 1000);
-  if (thousands > 0) {
-    if (thousands === 1) {
-      result += 'Bin';
-    } else {
-      result += ones[thousands] + 'bin';
-    }
-    num = num % 1000;
-  }
-  
-  // Yüzler
-  const hundred = Math.floor(num / 100);
-  if (hundred > 0) {
-    result += hundreds[hundred];
-    num = num % 100;
-  }
-  
-  // Onlar
-  const ten = Math.floor(num / 10);
-  if (ten > 0) {
-    result += tens[ten];
-    num = num % 10;
-  }
-  
-  // Birler
-  if (num > 0) {
-    result += ones[num];
-  }
-  
-  return result;
-}
-
-// Helper: String'i düzgün formata çevir
-function toTitleCase(str: string | number | null): string {
-  if (!str) return '';
-  const strValue = String(str);
-  
-  return strValue
-    .toLocaleLowerCase('tr-TR')
-    .split(' ')
-    .map(word => {
-      if (word.length === 0) return word;
-      const firstChar = word.charAt(0).toLocaleUpperCase('tr-TR');
-      const restOfWord = word.slice(1);
-      return firstChar + restOfWord;
-    })
-    .join(' ');
-}
-
-// Helper: TC No formatla
-function formatTcNo(tc: string | number | null): string {
-  if (!tc) return '';
-  const tcStr = String(tc);
-  return tcStr.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1 $2 $3 $4');
-}
 
 export async function POST(request: NextRequest) {
   try {
