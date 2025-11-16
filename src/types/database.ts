@@ -70,6 +70,7 @@ export interface IzinTalepleri {
   GunSayisi: number;
   Aciklama: string | null;
   Durum: TalepDurum;
+  YillikIzinYili: number | null;
   KoordinatorNotu: string | null;
   YonetimNotu: string | null;
   KoordinatorOnayTarihi: string | null;

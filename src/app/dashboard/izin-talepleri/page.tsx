@@ -45,18 +45,7 @@ function IzinTalepleriContent() {
     enabled: !!(user?.PersonelEmail && user?.PersonelRole)
   });
 
-  // Debug: SWR data değişimini izle (sadece development)
-  useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('📊 SWR Data güncellendi:', {
-        talepSayisi: swrTalepler.length,
-        beklemede: swrTalepler.filter(t => t.Durum === 'beklemede').length,
-        onaylanan: swrTalepler.filter(t => t.Durum === 'yonetim_onay').length,
-        reddedilen: swrTalepler.filter(t => t.Durum === 'reddedildi').length,
-        ilkTalep: swrTalepler[0]?.TalepID,
-      });
-    }
-  }, [swrTalepler]);
+  // SWR data tracking removed - causing console spam
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDurum, setFilterDurum] = useState<string>('all');
@@ -81,6 +70,7 @@ function IzinTalepleriContent() {
     BaslangicTarihi: '',
     BitisTarihi: '',
     Aciklama: '',
+    YillikIzinYili: null as number | null,
   });
 
   const [izinHesapBilgisi, setIzinHesapBilgisi] = useState<{
@@ -88,6 +78,20 @@ function IzinTalepleriContent() {
     calismaGunu: number;
     tatilGunSayisi: number;
   } | null>(null);
+
+  // Yıllık izin hakları
+  interface YillikIzinHak {
+    HakID: number;
+    PersonelTcKimlik: number;
+    Yil: number;
+    ToplamHakGun: number;
+    KullanilanGun: number;
+    KalanGun: number;
+    YilDurumu: 'aktif' | 'gelecek';
+    KullanimYuzdesi: number;
+  }
+  const [yillikIzinHaklari, setYillikIzinHaklari] = useState<YillikIzinHak[]>([]);
+  const [izinHaklariLoading, setIzinHaklariLoading] = useState(false);
 
   const [onayFormData, setOnayFormData] = useState({
     isApprove: true,
@@ -100,34 +104,67 @@ function IzinTalepleriContent() {
     DegisiklikNotu: '',
   });
 
+  // Yıllık izin haklarını getir
+  const fetchYillikIzinHaklari = useCallback(async (personelTcKimlik: string | number) => {
+    setIzinHaklariLoading(true);
+    try {
+      const response = await fetch(`/api/yillik-izin-haklari?personelTcKimlik=${personelTcKimlik}`, {
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        let errorData;
+        try {
+          errorData = await response.json();
+        } catch (parseError) {
+          throw new Error(`API Hatası: ${response.status}`);
+        }
+        throw new Error(errorData.error || `İzin hakları getirilemedi (${response.status})`);
+      }
+      
+      const data = await response.json();
+      setYillikIzinHaklari(data);
+    } catch (error) {
+      setYillikIzinHaklari([]);
+    } finally {
+      setIzinHaklariLoading(false);
+    }
+  }, []);
 
-  // Query params'dan personel bilgisini kontrol et
+  // Modal açma fonksiyonu - izin haklarını yükler
+  const openModalForUser = useCallback(async (tcKimlik?: string, name?: string) => {
+    if (tcKimlik && name) {
+      setCreatingForPersonel({ tcKimlik, adSoyad: name });
+      await fetchYillikIzinHaklari(tcKimlik);
+    } else if (user?.PersonelTcKimlik) {
+      setCreatingForPersonel(null);
+      await fetchYillikIzinHaklari(user.PersonelTcKimlik);
+    }
+    setModalOpen(true);
+  }, [user?.PersonelTcKimlik, fetchYillikIzinHaklari]);
+
+  // Query params'dan personel bilgisini kontrol et - SADECE İLK MOUNT'TA
   useEffect(() => {
     const createFor = searchParams.get('createFor');
     const name = searchParams.get('name');
     
-    console.log('🔗 Query params kontrol ediliyor:', { createFor, name, hasUser: !!user });
-    
-    if (createFor && name) {
+    if (createFor && name && user) {
       // Koordinatör veya yönetici kontrolü
-      if (user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'insan_kaynaklari') {
-        console.log('✅ Personel için izin oluşturma modu aktif:', {
-          tcKimlik: createFor,
-          adSoyad: name,
-          role: user.PersonelRole
-        });
-        
-        setCreatingForPersonel({
-          tcKimlik: createFor,
-          adSoyad: name
-        });
+      if (user.PersonelRole === 'koordinator' || user.PersonelRole === 'yonetici' || user.PersonelRole === 'insan_kaynaklari') {
+        // Modal'ı aç
+        setCreatingForPersonel({ tcKimlik: createFor, adSoyad: name });
+        fetchYillikIzinHaklari(createFor);
         setModalOpen(true);
         
         // URL'den parametreleri temizle
         router.replace('/dashboard/izin-talepleri');
       }
     }
-  }, [searchParams, user, router]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Sadece ilk mount'ta çalış
 
   // Debounced izin hesaplama fonksiyonu - 500ms bekler
   const debouncedCalculateIzin = useRef(
@@ -160,11 +197,50 @@ function IzinTalepleriContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.BaslangicTarihi, formData.BitisTarihi, user?.PersonelTcKimlik, creatingForPersonel]);
 
-  // Tatil günlerini tespit et (puantaj tablosundan)
+  // Otomatik tatil günleri hesaplama (puantaj verisi yoksa)
+  const calculateTatillerOtomatik = (startDate: Date, endDate: Date): string[] => {
+    const tatilGunleri: string[] = [];
+    
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+      const dayOfWeek = d.getDay(); // 0 = Pazar, 6 = Cumartesi
+      
+      // Pazar günleri otomatik tatil
+      if (dayOfWeek === 0) {
+        tatilGunleri.push(d.toISOString().split('T')[0]);
+      }
+      
+      // Resmi tatiller (Türkiye)
+      const tarihStr = d.toISOString().split('T')[0];
+      const [yil, ay, gun] = tarihStr.split('-').map(Number);
+      
+      // Yılbaşı
+      if (ay === 1 && gun === 1) tatilGunleri.push(tarihStr);
+      // 23 Nisan
+      if (ay === 4 && gun === 23) tatilGunleri.push(tarihStr);
+      // 1 Mayıs
+      if (ay === 5 && gun === 1) tatilGunleri.push(tarihStr);
+      // 19 Mayıs
+      if (ay === 5 && gun === 19) tatilGunleri.push(tarihStr);
+      // 30 Ağustos
+      if (ay === 8 && gun === 30) tatilGunleri.push(tarihStr);
+      // 29 Ekim
+      if (ay === 10 && gun === 29) tatilGunleri.push(tarihStr);
+      
+      // Ramazan ve Kurban Bayramları - 2025 tarihleri (manuel güncellenmeli)
+      // Ramazan Bayramı 2025: 30-31 Mart, 1 Nisan
+      if (yil === 2025 && ay === 3 && (gun === 30 || gun === 31)) tatilGunleri.push(tarihStr);
+      if (yil === 2025 && ay === 4 && gun === 1) tatilGunleri.push(tarihStr);
+      // Kurban Bayramı 2025: 6-9 Haziran
+      if (yil === 2025 && ay === 6 && (gun >= 6 && gun <= 9)) tatilGunleri.push(tarihStr);
+    }
+    
+    // Tekrar eden tarihleri kaldır
+    return [...new Set(tatilGunleri)];
+  };
+
+  // Tatil günlerini tespit et (puantaj tablosundan veya otomatik)
   const fetchTatilGunleri = async (personelId: string, baslangic: string, bitis: string): Promise<string[]> => {
     try {
-      console.log('🔍 Tatil günleri kontrol ediliyor:', { personelId, baslangic, bitis });
-      
       const startDate = new Date(baslangic);
       const endDate = new Date(bitis);
       
@@ -175,33 +251,24 @@ function IzinTalepleriContent() {
         aylar.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
       }
       
-      console.log('📅 Kontrol edilecek aylar:', Array.from(aylar));
-      
       // Kullanıcının BolgeID'sini al
       // Not: PersonelTcKimlik bigint tipinde, string olarak sorgulamak daha güvenli
       
       // Önce giriş yapan kullanıcının bilgilerini al (RLS için)
       const currentUserEmail = user?.PersonelEmail;
       if (!currentUserEmail) {
-        console.error('❌ Giriş yapan kullanıcı bulunamadı');
-        return [];
+        // Puantaj verisi alınamazsa otomatik hesaplama yap
+        return calculateTatillerOtomatik(startDate, endDate);
       }
 
       // API endpoint üzerinden sorgula (RLS bypass için service role kullanacak)
       const response = await fetch(`/api/personel?userEmail=${encodeURIComponent(currentUserEmail)}&userRole=${user?.PersonelRole || 'saha_personeli'}`);
       if (!response.ok) {
-        console.error('❌ Personel listesi alınamadı');
-        return [];
+        return calculateTatillerOtomatik(startDate, endDate);
       }
       
       const result = await response.json();
       const allPersonel = result.data || [];
-      
-      console.log('📋 API\'den gelen personel verisi:', {
-        totalCount: allPersonel.length,
-        arananTC: personelId,
-        ilkPersonel: allPersonel[0]?.PersonelTcKimlik
-      });
       
       // İlgili personeli bul
       const targetPersonel = allPersonel.find((p: { PersonelTcKimlik: number | string }) => {
@@ -211,12 +278,8 @@ function IzinTalepleriContent() {
       });
 
       if (!targetPersonel?.BolgeID) {
-        console.warn('⚠️ Personel bölge bilgisi bulunamadı:', {
-          personelId,
-          found: !!targetPersonel,
-          bolgeID: targetPersonel?.BolgeID
-        });
-        return [];
+        // Bölge bilgisi yoksa otomatik hesaplama yap
+        return calculateTatillerOtomatik(startDate, endDate);
       }
 
       const userData = {
@@ -226,6 +289,7 @@ function IzinTalepleriContent() {
 
       // Tatil günlerini tespit et
       const tatilGunleri: string[] = [];
+      let puantajBulunamadi = false;
       
       for (const yilAy of Array.from(aylar)) {
         const { data, error } = await supabase
@@ -235,49 +299,51 @@ function IzinTalepleriContent() {
           .eq('YilAy', yilAy)
           .single();
         
-        console.log(`📊 ${yilAy} puantaj verisi:`, { data, error });
+        if (error || !data) {
+          // Puantaj verisi bulunamadı - otomatik hesaplamaya geç
+          puantajBulunamadi = true;
+          continue;
+        }
+
+        // TakvimJSON: { "2025-10-01": { "isim": "Tam Gün", "baslangic": "08:00", "bitis": "18:00", "mola": 90 } }
+        // Tatil günleri: { "isim": "Resmi Tatil", "baslangic": null, "bitis": null, "mola": 0 }
+        const takvim = typeof data.TakvimJSON === 'string' 
+          ? JSON.parse(data.TakvimJSON) 
+          : data.TakvimJSON || {};
         
-        if (!error && data) {
-          // TakvimJSON: { "2025-10-01": { "isim": "Tam Gün", "baslangic": "08:00", "bitis": "18:00", "mola": 90 } }
-          // Tatil günleri: { "isim": "Resmi Tatil", "baslangic": null, "bitis": null, "mola": 0 }
-          const takvim = typeof data.TakvimJSON === 'string' 
-            ? JSON.parse(data.TakvimJSON) 
-            : data.TakvimJSON || {};
+        // Tarih aralığındaki her gün için kontrol et
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+          const tarihStr = d.toISOString().split('T')[0];
           
-          console.log('🗓️ Takvim parse edildi, örnek günler:', Object.keys(takvim).slice(0, 5));
-          
-          // Tarih aralığındaki her gün için kontrol et
-          for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
-            const tarihStr = d.toISOString().split('T')[0];
+          // Sadece bu ayın tarihlerini kontrol et
+          if (tarihStr.startsWith(yilAy)) {
+            const gunBilgi = takvim[tarihStr];
+            const dayOfWeek = d.getDay();
             
-            // Sadece bu ayın tarihlerini kontrol et
-            if (tarihStr.startsWith(yilAy)) {
-              const gunBilgi = takvim[tarihStr];
-              
-              console.log(`📆 ${tarihStr}:`, gunBilgi);
-              
-              // Gün bilgisi yoksa veya başlangıç/bitiş saati null ise = tatil
-              if (!gunBilgi) {
-                console.log(`❌ ${tarihStr} - Gün bilgisi yok, tatil sayılıyor`);
-                tatilGunleri.push(tarihStr);
-              } else if (gunBilgi.baslangic === null || gunBilgi.bitis === null) {
-                // Resmi Tatil veya Hafta Tatili - baslangic ve bitis null
-                console.log(`🏖️ ${tarihStr} - ${gunBilgi.isim} (baslangic: ${gunBilgi.baslangic}, bitis: ${gunBilgi.bitis})`);
-                tatilGunleri.push(tarihStr);
-              } else {
-                console.log(`💼 ${tarihStr} - Çalışma günü (${gunBilgi.baslangic} - ${gunBilgi.bitis})`);
-              }
+            // Gün bilgisi yoksa veya başlangıç/bitiş saati null ise = tatil
+            if (!gunBilgi) {
+              tatilGunleri.push(tarihStr);
+            } else if (gunBilgi.baslangic === null || gunBilgi.bitis === null) {
+              // Resmi Tatil veya Hafta Tatili
+              tatilGunleri.push(tarihStr);
+            } else if (dayOfWeek === 0) {
+              // Pazar günü - Puantajda çalışma günü gibi gösterilse bile tatil sayılır
+              tatilGunleri.push(tarihStr);
             }
           }
         }
       }
       
-      console.log('✅ Toplam tatil günleri:', tatilGunleri);
+      // Eğer hiç puantaj verisi bulunamadıysa otomatik hesapla
+      if (puantajBulunamadi && tatilGunleri.length === 0) {
+        return calculateTatillerOtomatik(startDate, endDate);
+      }
+      
       return tatilGunleri;
       
     } catch (error) {
-      console.error('❌ Tatil günleri alınırken hata:', error);
-      return [];
+      // Hata durumunda otomatik hesaplamaya geç
+      return calculateTatillerOtomatik(new Date(baslangic), new Date(bitis));
     }
   };
 
@@ -306,25 +372,18 @@ function IzinTalepleriContent() {
   const fetchGecmis = async (talepId: number) => {
     setHistoryLoading(true);
     try {
-      console.log('🔍 Geçmiş getiriliyor, TalepID:', talepId);
       const response = await fetch(`/api/izin-gecmis?talepId=${talepId}`);
       const result = await response.json();
       
-      console.log('📊 API Sonucu:', result);
-      
       if (result.error) {
-        console.error('❌ API Hatası:', result.error);
         alert('Geçmiş yüklenirken hata oluştu: ' + result.error);
       } else if (result.data) {
-        console.log('✅ Geçmiş yüklendi:', result.data.length, 'kayıt');
         setGecmis(result.data);
       } else {
-        console.warn('⚠️ Geçmiş verisi boş');
         setGecmis([]);
       }
     } catch (error) {
-      console.error('❌ Geçmiş yükleme hatası:', error);
-      alert('Geçmiş yüklenirken hata oluştu. Console\'u kontrol edin.');
+      alert('Geçmiş yüklenirken hata oluştu.');
     } finally {
       setHistoryLoading(false);
     }
@@ -332,7 +391,6 @@ function IzinTalepleriContent() {
 
   const saveGecmis = async (gecmisData: Partial<IzinTalepGecmis>) => {
     try {
-      console.log('💾 Geçmiş kaydediliyor:', gecmisData);
       const response = await fetch('/api/izin-gecmis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -340,16 +398,8 @@ function IzinTalepleriContent() {
       });
       
       const result = await response.json();
-      
-      if (result.error) {
-        console.error('❌ Geçmiş kaydetme hatası:', result.error);
-      } else {
-        console.log('✅ Geçmiş kaydedildi:', result.data);
-      }
-      
       return result.data;
     } catch (error) {
-      console.error('❌ Geçmiş kaydetme hatası:', error);
       return null;
     }
   };
@@ -370,12 +420,40 @@ function IzinTalepleriContent() {
       type: typeof targetTcKimlik
     });
 
+    // Yıllık izin için validasyon
+    if (formData.IzinTuru === 'yillik') {
+      if (!formData.YillikIzinYili) {
+        alert('⚠️ Lütfen hangi yılın izin hakkından kullanacağınızı seçin');
+        return;
+      }
+    }
+
     // Tatil günleri hariç izin günü hesapla
     const izinHesap = await calculateWorkingDays(
       targetTcKimlik.toString(), 
       formData.BaslangicTarihi, 
       formData.BitisTarihi
     );
+
+    // Yıllık izin hak kontrolü (uyarı amaçlı)
+    if (formData.IzinTuru === 'yillik' && formData.YillikIzinYili) {
+      const secilenHak = yillikIzinHaklari.find(h => h.Yil === formData.YillikIzinYili);
+      if (secilenHak) {
+        if (izinHesap.calismaGunu > secilenHak.KalanGun) {
+          const onay = confirm(
+            `⚠️ BİLGİLENDİRME\n\n` +
+            `Talep edilen izin: ${izinHesap.calismaGunu} gün\n` +
+            `${formData.YillikIzinYili} yılı kalan hakkınız: ${secilenHak.KalanGun} gün\n\n` +
+            `${izinHesap.calismaGunu - secilenHak.KalanGun} gün fazla izin talep ediyorsunuz.\n\n` +
+            `Şirket politikası gereği avans izin olarak değerlendirilebilir.\n` +
+            `Devam etmek istiyor musunuz?`
+          );
+          if (!onay) {
+            return;
+          }
+        }
+      }
+    }
 
     // Açıklama kısmına tatil bilgisi ve oluşturan kişi bilgisi ekle
     let aciklama = formData.Aciklama;
@@ -386,7 +464,7 @@ function IzinTalepleriContent() {
       aciklama += `\n\n👤 ${user.PersonelInfo?.P_AdSoyad} tarafından ${targetName} için oluşturuldu`;
     }
 
-    const talepData = {
+    const talepData: any = {
       PersonelTcKimlik: targetTcKimlik, // Supabase otomatik tip dönüşümü yapacak
       IzinTuru: formData.IzinTuru,
       BaslangicTarihi: formData.BaslangicTarihi,
@@ -395,6 +473,11 @@ function IzinTalepleriContent() {
       Aciklama: aciklama,
       Durum: 'beklemede' as TalepDurum,
     };
+
+    // Yıllık izin için yıl bilgisini ekle
+    if (formData.IzinTuru === 'yillik' && formData.YillikIzinYili) {
+      talepData.YillikIzinYili = formData.YillikIzinYili;
+    }
 
     console.log('💾 Database\'e gönderilen data:', talepData);
     console.log('👤 İşlemi yapan kullanıcı:', {
@@ -737,9 +820,11 @@ function IzinTalepleriContent() {
       BaslangicTarihi: '',
       BitisTarihi: '',
       Aciklama: '',
+      YillikIzinYili: null,
     });
     setIzinHesapBilgisi(null);
     setCreatingForPersonel(null); // Personel bilgisini temizle
+    setYillikIzinHaklari([]); // İzin haklarını temizle
   };
 
   const getIzinTuruLabel = (tur: string) => {
@@ -850,7 +935,7 @@ function IzinTalepleriContent() {
             <div className="flex gap-3">
               {isSahaPersoneli && (
                 <button
-                  onClick={() => setModalOpen(true)}
+                  onClick={() => openModalForUser()}
                   className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all duration-200 hover:scale-105"
                 >
                   <Plus className="w-5 h-5" />
@@ -977,6 +1062,11 @@ function IzinTalepleriContent() {
                             </h3>
                             <span className={`px-3 py-1 rounded-lg ${isDark ? 'bg-gray-700' : 'bg-gray-100'} ${isDark ? 'text-white' : 'text-gray-900'} text-sm`}>
                               {getIzinTuruLabel(talep.IzinTuru)}
+                              {talep.IzinTuru === 'yillik' && talep.YillikIzinYili && (
+                                <span className={`ml-2 font-bold ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+                                  {talep.YillikIzinYili}
+                                </span>
+                              )}
                             </span>
                             <span className={cn(
                               "px-3 py-1 rounded-lg text-white text-sm",
@@ -1204,7 +1294,7 @@ function IzinTalepleriContent() {
                     <select
                       required
                       value={formData.IzinTuru}
-                      onChange={(e) => setFormData({ ...formData, IzinTuru: e.target.value as IzinTuru })}
+                      onChange={(e) => setFormData({ ...formData, IzinTuru: e.target.value as IzinTuru, YillikIzinYili: null })}
                       className={cn(
                         'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
                         isDark 
@@ -1218,6 +1308,102 @@ function IzinTalepleriContent() {
                       <option value="raporlu">Raporlu İzin</option>
                     </select>
                   </div>
+
+                  {/* Yıllık İzin için Yıl Seçimi */}
+                  {formData.IzinTuru === 'yillik' && (
+                    <div>
+                      <label className={cn('block text-sm font-medium mb-2', isDark ? 'text-gray-300' : 'text-gray-700')}>
+                        Hangi Yılın İzin Hakkından? *
+                      </label>
+                      {izinHaklariLoading ? (
+                        <div className={cn('p-4 rounded-xl border text-center', isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200')}>
+                          <p className={cn('text-sm', isDark ? 'text-gray-300' : 'text-gray-600')}>Yükleniyor...</p>
+                        </div>
+                      ) : yillikIzinHaklari.length === 0 ? (
+                        <div className={cn('p-4 rounded-xl border', isDark ? 'bg-blue-900/20 border-blue-700' : 'bg-blue-50 border-blue-200')}>
+                          <p className={cn('text-sm mb-2', isDark ? 'text-blue-300' : 'text-blue-700')}>
+                            ℹ️ İşe başlama tarihi (P_KidemTarihi) bilgisi bulunamadı veya henüz 1 yıl dolmadı
+                          </p>
+                          <p className={cn('text-xs', isDark ? 'text-blue-400/70' : 'text-blue-600/70')}>
+                            Avans izin olarak gelecek yıldan seçim yapabilirsiniz
+                          </p>
+                          <select
+                            required={formData.IzinTuru === 'yillik'}
+                            value={formData.YillikIzinYili || ''}
+                            onChange={(e) => setFormData({ ...formData, YillikIzinYili: e.target.value ? parseInt(e.target.value) : null })}
+                            className={cn(
+                              'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 mt-3',
+                              isDark 
+                                ? 'bg-gray-700 border-gray-600 text-white' 
+                                : 'bg-white border-gray-300 text-gray-900'
+                            )}
+                          >
+                            <option value="">Yıl seçin (Avans İzin)</option>
+                            <option value={new Date().getFullYear()}>
+                              {new Date().getFullYear()} - Avans İzin
+                            </option>
+                            <option value={new Date().getFullYear() + 1}>
+                              {new Date().getFullYear() + 1} - Avans İzin
+                            </option>
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          <select
+                            required={formData.IzinTuru === 'yillik'}
+                            value={formData.YillikIzinYili || ''}
+                            onChange={(e) => setFormData({ ...formData, YillikIzinYili: e.target.value ? parseInt(e.target.value) : null })}
+                            className={cn(
+                              'w-full px-4 py-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500',
+                              isDark 
+                                ? 'bg-gray-700 border-gray-600 text-white' 
+                                : 'bg-white border-gray-300 text-gray-900'
+                            )}
+                          >
+                            <option value="">Yıl seçin</option>
+                            {/* Gelecek yıl (+1) seçeneği - henüz hak kazanılmamış olabilir */}
+                            {(() => {
+                              const gelecekYil = new Date().getFullYear() + 1;
+                              const gelecekYilHak = yillikIzinHaklari.find(h => h.Yil === gelecekYil);
+                              if (!gelecekYilHak) {
+                                return (
+                                  <option key={gelecekYil} value={gelecekYil}>
+                                    {gelecekYil} - Avans İzin (Henüz hak kazanılmadı)
+                                  </option>
+                                );
+                              }
+                            })()}
+                            {/* Mevcut ve geçmiş yıllar */}
+                            {yillikIzinHaklari.map(hak => (
+                              <option key={hak.Yil} value={hak.Yil}>
+                                {hak.Yil} - Kalan: {hak.KalanGun} gün (Toplam: {hak.ToplamHakGun})
+                                {hak.YilDurumu === 'gelecek' && ' - Gelecek'}
+                              </option>
+                            ))}
+                          </select>
+                          
+                          {/* İzin Hakkı Özeti */}
+                          <div className={cn('p-3 rounded-xl border', isDark ? 'bg-blue-900/20 border-blue-700' : 'bg-blue-50 border-blue-200')}>
+                            <p className={cn('text-xs font-semibold mb-2', isDark ? 'text-blue-300' : 'text-blue-700')}>
+                              💼 Yıllık İzin Hakkı Özeti
+                            </p>
+                            <div className="space-y-1">
+                              {yillikIzinHaklari.map(hak => (
+                                <div key={hak.Yil} className="flex justify-between text-xs">
+                                  <span className={cn(isDark ? 'text-gray-300' : 'text-gray-700')}>
+                                    {hak.Yil} {hak.YilDurumu === 'gelecek' && '(Gelecek)'}:
+                                  </span>
+                                  <span className={cn('font-medium', hak.KalanGun > 0 ? (isDark ? 'text-green-400' : 'text-green-600') : (isDark ? 'text-red-400' : 'text-red-600'))}>
+                                    {hak.KalanGun}/{hak.ToplamHakGun} gün
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -1263,15 +1449,72 @@ function IzinTalepleriContent() {
                         'p-4 rounded-xl border',
                         isDark ? 'bg-green-900/20 border-green-700' : 'bg-green-50 border-green-200'
                       )}>
-                        <p className={cn('text-sm mb-1', isDark ? 'text-green-300' : 'text-green-700')}>
-                          ✅ İzin Günü: <span className="font-bold text-lg">
-                            {izinHesapBilgisi.calismaGunu} gün
-                          </span>
-                        </p>
-                        <p className={cn('text-xs', isDark ? 'text-green-400/70' : 'text-green-600/70')}>
-                          Sadece çalışma günleri sayılır
+                        <div className="flex items-center justify-between mb-2">
+                          <p className={cn('text-sm font-medium', isDark ? 'text-green-300' : 'text-green-700')}>
+                            📅 Toplam Takvim Günü: <span className="font-bold">{izinHesapBilgisi.toplamGun} gün</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className={cn('text-sm font-medium', isDark ? 'text-green-300' : 'text-green-700')}>
+                            💼 İş Günü (Hak Kullanımı): <span className="font-bold text-lg">{izinHesapBilgisi.calismaGunu} gün</span>
+                          </p>
+                        </div>
+                        {izinHesapBilgisi.tatilGunSayisi > 0 && (
+                          <p className={cn('text-xs mt-2 pt-2 border-t', 
+                            isDark ? 'text-green-400/70 border-green-700/50' : 'text-green-600/70 border-green-200'
+                          )}>
+                            🏖️ {izinHesapBilgisi.tatilGunSayisi} tatil/hafta sonu günü çıkarıldı
+                          </p>
+                        )}
+                        <p className={cn('text-xs mt-1', isDark ? 'text-green-400/70' : 'text-green-600/70')}>
+                          * Yıllık izin hakları sadece iş günü üzerinden hesaplanır
                         </p>
                       </div>
+
+                      {/* Yıllık İzin Hakkı Kontrolü */}
+                      {formData.IzinTuru === 'yillik' && formData.YillikIzinYili && (() => {
+                        const secilenHak = yillikIzinHaklari.find(h => h.Yil === formData.YillikIzinYili);
+                        if (secilenHak && izinHesapBilgisi.calismaGunu > secilenHak.KalanGun) {
+                          return (
+                            <div className={cn(
+                              'p-4 rounded-xl border',
+                              isDark ? 'bg-red-900/20 border-red-700' : 'bg-red-50 border-red-200'
+                            )}>
+                              <p className={cn('text-sm font-bold mb-2', isDark ? 'text-red-300' : 'text-red-700')}>
+                                ⚠️ YETERSİZ İZİN HAKKI!
+                              </p>
+                              <div className={cn('text-sm space-y-1', isDark ? 'text-red-300' : 'text-red-700')}>
+                                <p>📊 Talep Edilen İş Günü: <span className="font-bold">{izinHesapBilgisi.calismaGunu} gün</span></p>
+                                <p>💼 Kalan İzin Hakkı: <span className="font-bold">{secilenHak.KalanGun} iş günü</span></p>
+                                <p>❌ Eksik: <span className="font-bold">{izinHesapBilgisi.calismaGunu - secilenHak.KalanGun} iş günü</span></p>
+                              </div>
+                              <p className={cn('text-xs mt-2 pt-2 border-t', 
+                                isDark ? 'text-red-400/70 border-red-700/50' : 'text-red-600/70 border-red-200'
+                              )}>
+                                💡 Şirket politikası gereği avans izin olarak verilebilir
+                              </p>
+                            </div>
+                          );
+                        }
+                        if (secilenHak) {
+                          return (
+                            <div className={cn(
+                              'p-4 rounded-xl border',
+                              isDark ? 'bg-blue-900/20 border-blue-700' : 'bg-blue-50 border-blue-200'
+                            )}>
+                              <p className={cn('text-sm font-bold mb-2', isDark ? 'text-blue-300' : 'text-blue-700')}>
+                                ✅ {formData.YillikIzinYili} YILI İZİN HAKKI DURUMU
+                              </p>
+                              <div className={cn('text-sm space-y-1', isDark ? 'text-blue-300' : 'text-blue-700')}>
+                                <p>💼 Toplam Hakkınız: <span className="font-bold">{secilenHak.ToplamHakGun} iş günü</span></p>
+                                <p>📊 Talep: <span className="font-bold">{izinHesapBilgisi.calismaGunu} iş günü</span></p>
+                                <p>✅ İzin Sonrası Kalan: <span className="font-bold text-green-500">{secilenHak.KalanGun - izinHesapBilgisi.calismaGunu} iş günü</span></p>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                       
                       {izinHesapBilgisi.tatilGunSayisi > 0 && (
                         <div className={cn(
@@ -1526,6 +1769,9 @@ function TalepDetayModal({ talep, onClose, getIzinTuruLabel, getDurumLabel }: an
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <InfoField label="İzin Türü" value={getIzinTuruLabel(talep.IzinTuru)} />
               <InfoField label="Durum" value={getDurumLabel(talep.Durum)} />
+              {talep.IzinTuru === 'yillik' && talep.YillikIzinYili && (
+                <InfoField label="İzin Hakkı Yılı" value={`${talep.YillikIzinYili}`} />
+              )}
               <InfoField label="Başlangıç" value={new Date(talep.BaslangicTarihi).toLocaleDateString('tr-TR')} />
               <InfoField label="Bitiş" value={new Date(talep.BitisTarihi).toLocaleDateString('tr-TR')} />
               <InfoField 
@@ -1604,7 +1850,7 @@ function TalepDetayModal({ talep, onClose, getIzinTuruLabel, getDurumLabel }: an
                 <polyline points="7 10 12 15 17 10"></polyline>
                 <line x1="12" y1="15" x2="12" y2="3"></line>
               </svg>
-              Sözleşme İndir (PDF)
+              İzin Belgesi İndir (PDF)
             </button>
           )}
           <button

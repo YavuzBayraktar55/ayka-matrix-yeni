@@ -121,27 +121,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Auth değişikliklerini dinle - sadece SIGNED_IN ve SIGNED_OUT eventlerinde user data yükle
+    // Auth değişikliklerini dinle - tüm gereksiz eventleri ignore et
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      // Sadece gerçek auth değişikliklerinde işlem yap
+      // Sadece SIGNED_IN durumunda user data yükle, diğer tüm eventleri ignore et
       if (event === 'SIGNED_IN' && session?.user) {
-        // Eğer zaten yükleme yapılıyorsa, bekle
-        if (!loadingRef.current) {
+        if (!loadingRef.current && !user) {
           loadUserData(session.user.email!);
         }
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setLoading(false);
-        loadingRef.current = false;
       }
-      // TOKEN_REFRESHED, USER_UPDATED, INITIAL_SESSION gibi diğer eventleri ignore et
-      // Bu sayede gereksiz re-fetch'ler önlenir
+      // SIGNED_OUT eventini sadece signOut() fonksiyonunda handle ediyoruz
+      // Diğer tüm eventleri (TOKEN_REFRESHED, USER_UPDATED, INITIAL_SESSION, vb.) ignore et
     });
 
     return () => subscription.unsubscribe();
-  }, [loadUserData]); // Only loadUserData dependency
+  }, [loadUserData]); // user dependency KALDIRILDI - sonsuz döngü önlendi
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -174,6 +169,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     await supabaseRef.current.auth.signOut();
     setUser(null);
+    // Client-side yönlendirme
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login';
+    }
   };
 
   return (

@@ -234,12 +234,6 @@ export default function PersonelPage() {
   };
 
   const handleCreateIzin = (personel: FullPersonel) => {
-    console.log('🚀 İzin oluşturma başlatılıyor:', {
-      PersonelTcKimlik: personel.PersonelTcKimlik,
-      PersonelAdSoyad: personel.PersonelInfo?.P_AdSoyad,
-      type: typeof personel.PersonelTcKimlik
-    });
-    
     // İzin talepleri sayfasına yönlendir ve personel bilgisini query params ile gönder
     router.push(`/dashboard/izin-talepleri?createFor=${personel.PersonelTcKimlik}&name=${encodeURIComponent(personel.PersonelInfo?.P_AdSoyad || '')}`);
   };
@@ -1304,7 +1298,9 @@ function PersonelViewModal({ personel, onClose, getRoleLabel }: any) {
               Kişisel Bilgiler
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <InfoField label="Doğum Tarihi" value={personel.PersonelInfo?.P_DogumTarihi} />
+              <InfoField label="Doğum Tarihi" value={personel.PersonelInfo?.P_DogumTarihi ? new Date(personel.PersonelInfo.P_DogumTarihi).toLocaleDateString('tr-TR') : '-'} />
+              <InfoField label="İşe Başlama Tarihi (Kıdem)" value={personel.PersonelInfo?.P_KidemTarihi ? new Date(personel.PersonelInfo.P_KidemTarihi).toLocaleDateString('tr-TR') : '-'} />
+              <InfoField label="AYKA Sözleşme Tarihi" value={personel.PersonelInfo?.P_AykaSozlesmeTarihi ? new Date(personel.PersonelInfo.P_AykaSozlesmeTarihi).toLocaleDateString('tr-TR') : '-'} />
               <InfoField label="Doğum Yeri" value={personel.PersonelInfo?.P_DogumYeri} />
               <InfoField label="Baba Adı" value={personel.PersonelInfo?.P_BabaAdi} />
               <InfoField label="Kan Grubu" value={personel.PersonelInfo?.P_KanGrubu} />

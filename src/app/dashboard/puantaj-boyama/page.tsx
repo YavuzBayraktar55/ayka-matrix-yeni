@@ -56,6 +56,11 @@ export default function PuantajPage() {
   
   const [loading, setLoading] = useState(true);
   const [bolgeAdi, setBolgeAdi] = useState('');
+  const [tumBolgeler, setTumBolgeler] = useState<{BolgeID: number; BolgeAdi: string; BolgeSicilNo: string}[]>([]);
+  
+  // Yönetici/Koordinatör için seçili bölge, diğerleri için kendi bölgesi
+  const [secilenBolgeId, setSecilenBolgeId] = useState<number | null>(null);
+  
   const [secilenAy, setSecilenAy] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -89,18 +94,51 @@ export default function PuantajPage() {
     return gunler;
   };
 
+  // Yönetici/Koordinatör kontrolü
+  const isYonetici = user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'insan_kaynaklari';
+  
+  // İlk yüklemede bölgeleri çek ve varsayılan bölgeyi seç
   useEffect(() => {
-    if (user?.BolgeID) yukleVeriler();
+    const initBolgeler = async () => {
+      if (!user) return;
+      
+      const bolgeId = user?.BolgeID;
+      
+      if (isYonetici) {
+        // Tüm bölgeleri çek
+        const { data: bolgeler } = await supabase
+          .from('BolgeInfo')
+          .select('BolgeID, BolgeAdi, BolgeSicilNo')
+          .order('BolgeAdi', { ascending: true });
+        
+        if (bolgeler) {
+          setTumBolgeler(bolgeler);
+          // Varsayılan olarak kullanıcının kendi bölgesini seç
+          setSecilenBolgeId(bolgeId || bolgeler[0]?.BolgeID || null);
+        }
+      } else {
+        // Saha personeli - sadece kendi bölgesi
+        setSecilenBolgeId(bolgeId || null);
+      }
+    };
+    
+    initBolgeler();
+  }, [user, isYonetici]);
+
+  useEffect(() => {
+    if (secilenBolgeId) yukleVeriler();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, secilenAy]);
+  }, [secilenBolgeId, secilenAy]);
 
   const yukleVeriler = async () => {
+    if (!secilenBolgeId) return;
+    
     setLoading(true);
     try {
       const { data: bolge } = await supabase
         .from('BolgeInfo')
         .select('BolgeAdi')
-        .eq('BolgeID', user?.BolgeID)
+        .eq('BolgeID', secilenBolgeId)
         .single();
       if (bolge?.BolgeAdi) setBolgeAdi(bolge.BolgeAdi);
 
@@ -108,7 +146,7 @@ export default function PuantajPage() {
       const { data: sonPuantaj } = await supabase
         .from('AylikPuantaj')
         .select('SablonlarJSON')
-        .eq('BolgeID', user?.BolgeID)
+        .eq('BolgeID', secilenBolgeId)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -131,10 +169,12 @@ export default function PuantajPage() {
   };
 
   const yukleAylikPuantaj = async () => {
+    if (!secilenBolgeId) return;
+    
     const { data } = await supabase
       .from('AylikPuantaj')
       .select('*')
-      .eq('BolgeID', user?.BolgeID)
+      .eq('BolgeID', secilenBolgeId)
       .eq('YilAy', secilenAy)
       .single();
 
@@ -201,12 +241,12 @@ export default function PuantajPage() {
       const { data } = await supabase
         .from('AylikPuantaj')
         .insert({
-          BolgeID: user.BolgeID,
+          BolgeID: secilenBolgeId,
           YilAy: secilenAy,
           TakvimJSON: JSON.stringify(bosTakvim),
           SablonlarJSON: JSON.stringify(sablonlar),
           Durum: 'hazirlanıyor',
-          KaydedenKisi: user.PersonelTcKimlik
+          KaydedenKisi: user?.PersonelTcKimlik
         })
         .select()
         .single();
@@ -333,6 +373,24 @@ export default function PuantajPage() {
       {/* Ay Seçici */}
       <div className={`${isDark ? 'bg-gray-800' : 'bg-white'} rounded-xl p-6 border ${isDark ? 'border-gray-700' : 'border-gray-200'} shadow-sm`}>
         <div className="flex items-center justify-between mb-6">
+          {/* Yönetici/Koordinatör için bölge seçici */}
+          {isYonetici && tumBolgeler.length > 0 && (
+            <select
+              value={secilenBolgeId || ''}
+              onChange={(e) => setSecilenBolgeId(Number(e.target.value))}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                isDark 
+                  ? 'bg-gray-700 text-white border border-gray-600 hover:bg-gray-600' 
+                  : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {tumBolgeler.map((b) => (
+                <option key={b.BolgeID} value={b.BolgeID}>
+                  {b.BolgeAdi}
+                </option>
+              ))}
+            </select>
+          )}
           <button onClick={() => ayDegistir('prev')} className={`p-2 rounded-lg transition-colors ${isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
             <ChevronLeft className={`w-5 h-5 ${isDark ? 'text-gray-300' : 'text-gray-700'}`} />
           </button>

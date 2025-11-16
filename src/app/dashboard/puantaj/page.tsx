@@ -50,6 +50,10 @@ export default function PuantajPage() {
   const [loading, setLoading] = useState(true);
   const [bolge, setBolge] = useState<BolgeInfo | null>(null);
   const [puantajVerisi, setPuantajVerisi] = useState<PuantajSatir[]>([]);
+  const [tumBolgeler, setTumBolgeler] = useState<BolgeInfo[]>([]);
+  
+  // Yönetici/Koordinatör için seçili bölge, diğerleri için kendi bölgesi
+  const [secilenBolgeId, setSecilenBolgeId] = useState<number | null>(null);
   
   const [secilenAy, setSecilenAy] = useState(() => {
     const now = new Date();
@@ -77,26 +81,55 @@ export default function PuantajPage() {
   
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
+  // Yönetici/Koordinatör kontrolü
+  const isYonetici = user?.PersonelRole === 'yonetici' || user?.PersonelRole === 'koordinator' || user?.PersonelRole === 'insan_kaynaklari';
+  
+  // İlk yüklemede bölgeleri çek ve varsayılan bölgeyi seç
   useEffect(() => {
-    const [yil, ay] = secilenAy.split('-').map(Number);
-    const sonGun = new Date(yil, ay, 0).getDate();
-    const gunListesi: Date[] = [];
+    const initBolgeler = async () => {
+      if (!user) return;
+      
+      if (isYonetici) {
+        // Tüm bölgeleri çek
+        const { data: bolgeler } = await supabase
+          .from('BolgeInfo')
+          .select('BolgeID, BolgeAdi, BolgeSicilNo')
+          .order('BolgeAdi', { ascending: true });
+        
+        if (bolgeler) {
+          setTumBolgeler(bolgeler);
+          // Varsayılan olarak kullanıcının kendi bölgesini seç
+          setSecilenBolgeId(user.BolgeID || bolgeler[0]?.BolgeID || null);
+        }
+      } else {
+        // Saha personeli - sadece kendi bölgesi
+        setSecilenBolgeId(user.BolgeID || null);
+      }
+    };
     
-    for (let i = 1; i <= sonGun; i++) {
-      gunListesi.push(new Date(yil, ay - 1, i));
-    }
-    
-    setGunler(gunListesi);
-  }, [secilenAy]);
+    initBolgeler();
+  }, [user, isYonetici]);
 
+  // gunler artık yukleVeriler içinde hesaplanıyor, ayrı useEffect gerekmez
+
+  const bolgeId = secilenBolgeId; // Seçili bölge ID'si
+  
   const yukleVeriler = useCallback(async () => {
-    if (!user?.BolgeID) return;
+    if (!bolgeId) return;
     setLoading(true);
     try {
+      // Günleri burada hesapla - state'e bağımlı olmayalım
+      const [yil, ay] = secilenAy.split('-').map(Number);
+      const sonGun = new Date(yil, ay, 0).getDate();
+      const gunListesi: Date[] = [];
+      for (let i = 1; i <= sonGun; i++) {
+        gunListesi.push(new Date(yil, ay - 1, i));
+      }
+      
       const { data: bolgeData } = await supabase
         .from('BolgeInfo')
         .select('BolgeID, BolgeAdi, BolgeSicilNo')
-        .eq('BolgeID', user!.BolgeID)
+        .eq('BolgeID', bolgeId)
         .single();
       
       if (bolgeData) setBolge(bolgeData);
@@ -109,7 +142,7 @@ export default function PuantajPage() {
           P_AykaSozlesmeTarihi,
           PersonelLevelizasyon!inner(BolgeID)
         `)
-        .eq('PersonelLevelizasyon.BolgeID', user!.BolgeID)
+        .eq('PersonelLevelizasyon.BolgeID', bolgeId)
         .order('P_AdSoyad', { ascending: true });
 
       if (personelData) {
@@ -135,7 +168,7 @@ export default function PuantajPage() {
         const { data: aylikPuantaj } = await supabase
           .from('AylikPuantaj')
           .select('PuantajID, TakvimJSON, Durum')
-          .eq('BolgeID', user!.BolgeID)
+          .eq('BolgeID', bolgeId)
           .eq('YilAy', secilenAy)
           .single();
 
@@ -162,7 +195,7 @@ export default function PuantajPage() {
 
           // for each satir and date, populate hucreler only for Resmi Tatil (RT) and Hafta Tatili (T)
           satirlar.forEach((satir) => {
-            gunler.forEach((gun) => {
+            gunListesi.forEach((gun) => {
               const tarih = `${gun.getFullYear()}-${String(gun.getMonth() + 1).padStart(2, '0')}-${String(gun.getDate()).padStart(2, '0')}`;
               const entry = takvim[tarih];
               if (entry && entry.isim) {
@@ -282,25 +315,28 @@ export default function PuantajPage() {
           setPuantajVerisi(satirlar);
         }
       }
+      
+      // Günleri state'e kaydet (UI için gerekli)
+      setGunler(gunListesi);
     } catch (error) {
       console.error('Veri yukleme hatasi:', error);
     }
     setLoading(false);
-  }, [user, secilenAy, gunler]);
+  }, [bolgeId, secilenAy]); // Primitive değer kullan - object referansı değil
 
   useEffect(() => {
-    if (user?.BolgeID) {
+    if (bolgeId) {
       void yukleVeriler();
     }
-  }, [user, yukleVeriler]);
+  }, [bolgeId, secilenAy, yukleVeriler]); // Tüm dependencies dahil
 
   // Manuel değişiklikleri veritabanından çek
   const degisiklikleriCek = async () => {
-    if (!user?.BolgeID) return;
+    if (!bolgeId) return;
     
     setKaydediliyor(true);
     try {
-      const response = await fetch(`/api/puantaj-degisiklik?bolgeId=${user.BolgeID}&yilAy=${secilenAy}`);
+      const response = await fetch(`/api/puantaj-degisiklik?bolgeId=${bolgeId}&yilAy=${secilenAy}`);
       if (response.ok) {
         const { degisiklikler } = await response.json();
         setManuelDegisiklikler(degisiklikler || {});
@@ -371,7 +407,7 @@ export default function PuantajPage() {
 
   // Manuel değişiklikleri veritabanına kaydet
   const degisiklikleriKaydet = async () => {
-    if (!user?.BolgeID || kaydedilecekDegisiklikler.length === 0) {
+    if (!bolgeId || kaydedilecekDegisiklikler.length === 0) {
       alert('Kaydedilecek değişiklik yok!');
       return;
     }
@@ -386,7 +422,7 @@ export default function PuantajPage() {
           // Eğer silme işareti varsa veya değer boşsa, DELETE isteği gönder
           if (degisiklik.silme || degisiklik.HucreDeger === null) {
             const response = await fetch(
-              `/api/puantaj-degisiklik?bolgeId=${user.BolgeID}&personelTc=${degisiklik.PersonelTcKimlik}&yilAy=${secilenAy}&tarih=${degisiklik.Tarih}`,
+              `/api/puantaj-degisiklik?bolgeId=${bolgeId}&personelTc=${degisiklik.PersonelTcKimlik}&yilAy=${secilenAy}&tarih=${degisiklik.Tarih}`,
               { method: 'DELETE' }
             );
             
@@ -401,7 +437,7 @@ export default function PuantajPage() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                BolgeID: user.BolgeID,
+                BolgeID: bolgeId,
                 PersonelTcKimlik: degisiklik.PersonelTcKimlik,
                 YilAy: secilenAy,
                 Tarih: degisiklik.Tarih,
@@ -409,7 +445,7 @@ export default function PuantajPage() {
                 NetSoforluk: degisiklik.NetSoforluk || null,
                 GunlukBrut: degisiklik.GunlukBrut || null,
                 YolYardimi: degisiklik.YolYardimi || null,
-                DegistirenKisi: user.PersonelEmail || String(user.PersonelTcKimlik)
+                DegistirenKisi: user?.PersonelEmail || String(user?.PersonelTcKimlik || '')
               })
             });
 
@@ -1070,6 +1106,24 @@ export default function PuantajPage() {
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Yönetici/Koordinatör için bölge seçici */}
+                {isYonetici && tumBolgeler.length > 0 && (
+                  <select
+                    value={secilenBolgeId || ''}
+                    onChange={(e) => setSecilenBolgeId(Number(e.target.value))}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isDark 
+                        ? 'bg-gray-700 text-white border border-gray-600 hover:bg-gray-600' 
+                        : 'bg-white text-gray-900 border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {tumBolgeler.map((b) => (
+                      <option key={b.BolgeID} value={b.BolgeID}>
+                        {b.BolgeAdi}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button onClick={() => ayDegistir('onceki')} className={`p-1.5 rounded-lg transition-all ${isDark ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300'}`}>
                   <ChevronLeft className="w-4 h-4" />
                 </button>
