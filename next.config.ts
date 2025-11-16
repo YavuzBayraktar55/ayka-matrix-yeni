@@ -18,8 +18,20 @@ const nextConfig: NextConfig = {
         } 
       : false,
   },
+  
+  // React Strict Mode'u devre dışı bırak (konsol gürültüsünü azaltır)
+  // Development'ta false, production build öncesi true yapın
+  reactStrictMode: false,
+  
   // Watchpack hatalarını önle - sistem dosyalarını izleme
-  webpack: (config, { isServer }) => {
+  webpack: (config, { isServer, dev }) => {
+    // Development modunda console.log'ları sustur
+    if (dev) {
+      config.infrastructureLogging = {
+        level: 'error',
+      };
+    }
+    
     config.watchOptions = {
       ...config.watchOptions,
       ignored: [
@@ -34,7 +46,13 @@ const nextConfig: NextConfig = {
         '**/C:/$RECYCLE.BIN/**',
       ],
     };
+    
     return config;
+  },
+  
+  // Performans optimizasyonları
+  experimental: {
+    optimizePackageImports: ['@/components', '@/lib', '@/hooks'],
   },
 };
 

@@ -34,6 +34,39 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="tr" suppressHydrationWarning>
+      <head>
+        {/* Konsol filtrelerini en başta yükle */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (typeof window !== 'undefined' && '${process.env.NODE_ENV}' === 'development') {
+                const originalWarn = console.warn;
+                const originalLog = console.log;
+                
+                console.warn = function(...args) {
+                  const msg = String(args[0] || '');
+                  if (msg.includes('Download the React DevTools') || 
+                      msg.includes('Skipping auto-scroll') || 
+                      msg.includes('position: sticky') ||
+                      msg.includes('position: fixed')) {
+                    return;
+                  }
+                  originalWarn.apply(console, args);
+                };
+                
+                console.log = function(...args) {
+                  const msg = String(args[0] || '');
+                  if (msg.includes('[Fast Refresh]') || 
+                      msg.includes('Skipping auto-scroll')) {
+                    return;
+                  }
+                  originalLog.apply(console, args);
+                };
+              }
+            `,
+          }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
